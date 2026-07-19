@@ -22,7 +22,7 @@ resource "local_sensitive_file" "ansible_group_vars" {
   file_permission = "0600"
 
   content = yamlencode({
-    ansible_user                 = "ubuntu"
+    ansible_user                 = "admin" # Debian cloud images' default user
     ansible_ssh_private_key_file = abspath(local_sensitive_file.ssh_key.filename)
 
     gitlab_host          = local.gitlab_host

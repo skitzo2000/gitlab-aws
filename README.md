@@ -5,7 +5,8 @@ Self-hosted GitLab for the demo, built to be **cheap, disposable, and two-comman
 configures it. `terraform destroy` deletes every trace.
 
 **Terraform provisions, Ansible configures.** No bash in user-data — instances
-boot vanilla Ubuntu; Terraform generates the Ansible inventory and hands off.
+boot vanilla **Debian 13 minimal** (smallest surface area: no snapd, lean
+default package set); Terraform generates the Ansible inventory and hands off.
 
 ## Architecture
 
@@ -43,6 +44,7 @@ Design decisions (mirrors the demo deck):
 | EIP on the **control plane** + `sslip.io` | k3s svclb tolerates the CP taint and binds 80/5050/2222 on every node, so the CP's stable IP fronts the GitLab pod wherever it runs. URL never changes across rebuilds of workers |
 | Manifests via k3s **auto-deploy dir** | Ansible just templates YAML into `/var/lib/rancher/k3s/server/manifests/` — no kubectl apply, no helm, no python k8s deps |
 | Runner config **pre-provisioned** | Ansible creates an instance runner through the GitLab API and templates a complete `config.toml` (kubernetes executor, privileged for dind) into a Secret — the runner pod just runs, no `register` step |
+| **Debian 13 minimal** AMI | Widest-surface-area OS avoided: official Debian cloud image, no snapd, minimal package set. SSH user is `admin` |
 
 ## Cost (us-east-1, approximate)
 

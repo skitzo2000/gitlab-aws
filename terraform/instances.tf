@@ -4,13 +4,15 @@ locals {
   gitlab_host = "gitlab.${replace(aws_eip.cp.public_ip, ".", "-")}.sslip.io"
 }
 
-data "aws_ami" "ubuntu" {
+# Official Debian cloud image — minimal surface area vs. Ubuntu (no snapd,
+# no motd phone-home, smaller default package set). Default SSH user: admin.
+data "aws_ami" "debian" {
   most_recent = true
-  owners      = ["099720109477"] # Canonical
+  owners      = ["136693071363"] # Debian
 
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
+    values = ["debian-13-amd64-*"]
   }
 
   filter {
@@ -71,7 +73,7 @@ resource "aws_eip_association" "cp" {
 # 80/5050/2222 still answer on this node and forward to the GitLab pod on
 # the workers — which is why the EIP lives here.)
 resource "aws_instance" "cp" {
-  ami                    = data.aws_ami.ubuntu.id
+  ami                    = data.aws_ami.debian.id
   instance_type          = var.cp_instance_type
   subnet_id              = aws_subnet.public.id
   private_ip             = var.cp_private_ip
@@ -113,7 +115,7 @@ resource "aws_instance" "cp" {
 resource "aws_instance" "worker" {
   count = var.worker_count
 
-  ami                    = data.aws_ami.ubuntu.id
+  ami                    = data.aws_ami.debian.id
   instance_type          = var.worker_instance_type
   subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.cluster.id]

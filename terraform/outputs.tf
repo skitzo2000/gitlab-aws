@@ -36,12 +36,12 @@ output "worker_public_ips" {
 
 output "ssh_control_plane" {
   description = "SSH to the control plane."
-  value       = "ssh -i ${var.project}-key.pem ubuntu@${aws_eip.cp.public_ip}"
+  value       = "ssh -i ${var.project}-key.pem admin@${aws_eip.cp.public_ip}"
 }
 
 output "kubeconfig_command" {
   description = "Fetch a working kubeconfig to your machine."
-  value       = "ssh -i ${var.project}-key.pem ubuntu@${aws_eip.cp.public_ip} 'sudo cat /etc/rancher/k3s/k3s.yaml' | sed 's/127.0.0.1/${aws_eip.cp.public_ip}/' > kubeconfig && export KUBECONFIG=$PWD/kubeconfig"
+  value       = "ssh -i ${var.project}-key.pem admin@${aws_eip.cp.public_ip} 'sudo cat /etc/rancher/k3s/k3s.yaml' | sed 's/127.0.0.1/${aws_eip.cp.public_ip}/' > kubeconfig && export KUBECONFIG=$PWD/kubeconfig"
 }
 
 output "ansible_command" {
