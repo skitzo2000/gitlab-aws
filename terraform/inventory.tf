@@ -43,4 +43,29 @@ resource "local_sensitive_file" "ansible_group_vars" {
     cp_public_ip  = aws_eip.cp.public_ip
     cp_private_ip = var.cp_private_ip
   })
+
+  # Config coherence checks — every value funnels through this file on its
+  # way to Ansible, so misconfigurations are caught here at plan time with
+  # a pointer to the right step in terraform.tfvars.example.
+  lifecycle {
+    precondition {
+      condition     = var.route53_zone_id == "" || var.domain != ""
+      error_message = "route53_zone_id is set but domain is empty — set domain too (terraform.tfvars.example STEP 2)."
+    }
+
+    precondition {
+      condition     = var.keycloak_issuer_url == "" || var.domain != ""
+      error_message = "SSO requires the real-domain/HTTPS setup: Keycloak redirects back to GitLab's public URL. Set domain (STEP 2) before enabling Keycloak (STEP 3)."
+    }
+
+    precondition {
+      condition     = var.keycloak_issuer_url == "" || var.keycloak_client_secret != ""
+      error_message = "keycloak_issuer_url is set but keycloak_client_secret is empty — register the confidential client in Keycloak and set its secret (terraform.tfvars.example STEP 3)."
+    }
+
+    precondition {
+      condition     = var.keycloak_issuer_url == "" || can(regex("^https://", var.keycloak_issuer_url))
+      error_message = "keycloak_issuer_url must be an https:// realm URL, e.g. https://keycloak.amnesia-labs.com/realms/<realm>."
+    }
+  }
 }

@@ -157,23 +157,40 @@ defaults, both in the omniauth block in
 `ansible/roles/gitlab/templates/gitlab.yaml.j2`. PKCE is enabled. Leaving
 `keycloak_issuer_url` empty disables the whole block.
 
-## Knobs (terraform/variables.tf)
+## Configuration
 
-All configuration is centralized in `terraform/variables.tf`; copy
-`terraform.tfvars.example` to `terraform.tfvars` (gitignored) to override.
-Highlights:
+One central config, one direction of flow:
 
-| Variable | Default | Note |
+```
+terraform.tfvars  ──►  terraform/variables.tf  ──►  AWS resources
+   (your values)       (single source of truth,  └►  ansible/inventory/  ──►  k8s manifests
+                        reference + defaults)        (generated group_vars)   (GitLab, runner)
+```
+
+Nothing is configured anywhere else — Ansible has no variables of its own,
+manifests restate nothing. Change a value, `terraform apply`, re-run the
+playbook, and it lands everywhere it's used.
+
+**Start with [`terraform/terraform.tfvars.example`](terraform/terraform.tfvars.example)** —
+it's written as a step-by-step walkthrough. Copy it to `terraform.tfvars`
+(gitignored) and work top to bottom; each step unlocks one capability:
+
+| Step | What you set | What you get |
 |---|---|---|
-| `region` | `us-east-1` | |
-| `admin_cidr` | `0.0.0.0/0` | **Narrow to your IP** — gates SSH + k3s API |
-| `domain` / `route53_zone_id` | `""` | real DNS (see above); empty = sslip.io |
-| `keycloak_issuer_url` / `_client_id` / `_client_secret` | `""` | SSO against the amnesia-labs Keycloak; empty issuer = disabled |
-| `use_spot` | `true` | `false` for on-demand |
-| `worker_count` | `2` | |
-| `vpc_cidr` / `subnet_cidr` | `10.60.0.0/16` / `10.60.1.0/24` | avoids k3s' 10.42/10.43 |
-| `gitlab_image` | `gitlab/gitlab-ce:18.5.0-ce.0` | bump as needed |
-| `runner_image` | `gitlab/gitlab-runner:alpine-v18.5.0` | keep in step with GitLab |
+| *(none)* | nothing — empty tfvars works | HTTP demo at `http://gitlab.<eip>.sslip.io` |
+| **1** | `region`, `admin_cidr` | admin plane (SSH, k3s API) locked to your IP |
+| **2** | `domain` (+ `route53_zone_id`) | real URLs + automatic HTTPS via Let's Encrypt |
+| **3** | `keycloak_issuer_url`, `_client_id`, `_client_secret` | SSO against the amnesia-labs Keycloak (needs step 2) |
+| **4** | `use_spot`, instance types/counts, volumes | sizing & cost |
+| **5** | `gitlab_image`, `runner_image` | version bumps |
+| **6** | `vpc_cidr`, `subnet_cidr`, `cp_private_ip` | network layout (rarely) |
+
+`terraform/variables.tf` is the full reference — every variable carries a
+description, grouped in the same section order. **Incoherent combinations
+fail at `terraform plan`** with a message naming the step to fix (e.g. a
+Route 53 zone without a domain, or Keycloak SSO without the HTTPS domain it
+depends on) — checks live on the generated group_vars file in
+`terraform/inventory.tf`, the choke point every value flows through.
 
 ## Caveats (it's a demo, on purpose)
 
