@@ -24,6 +24,11 @@ output "git_ssh" {
   value       = "ssh://git@${local.gitlab_host}:2222"
 }
 
+output "keycloak_redirect_uri" {
+  description = "Redirect URI to register on the Keycloak client for this GitLab."
+  value       = "${local.gitlab_scheme}://${local.gitlab_host}/users/auth/openid_connect/callback"
+}
+
 output "dns_record" {
   description = "DNS state: what Terraform manages, or the record you need to create."
   value = (

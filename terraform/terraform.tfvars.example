@@ -21,6 +21,15 @@
 # Let's Encrypt contact (default: admin@<domain>)
 # letsencrypt_email = "you@example.com"
 
+# --- SSO via the amnesia-labs Keycloak (OIDC) -------------------------------
+
+# Register a confidential client in Keycloak (standard flow) with the
+# redirect URI from `terraform output keycloak_redirect_uri`, then:
+# keycloak_issuer_url    = "https://keycloak.amnesia-labs.com/realms/amnesia"
+# keycloak_client_id     = "gitlab"
+# keycloak_client_secret = "..."
+# keycloak_label         = "Amnesia Labs SSO"
+
 # --- Sizing / cost ----------------------------------------------------------
 
 # use_spot             = true

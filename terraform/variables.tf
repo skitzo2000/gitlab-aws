@@ -94,6 +94,31 @@ variable "route53_zone_id" {
   default     = ""
 }
 
+variable "keycloak_issuer_url" {
+  description = "OIDC issuer URL of the (external) amnesia-labs Keycloak realm, e.g. https://keycloak.amnesia-labs.com/realms/amnesia. Empty disables SSO."
+  type        = string
+  default     = ""
+}
+
+variable "keycloak_client_id" {
+  description = "OIDC client ID registered in Keycloak for this GitLab."
+  type        = string
+  default     = "gitlab"
+}
+
+variable "keycloak_client_secret" {
+  description = "Client secret of the Keycloak client (confidential client, standard flow)."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "keycloak_label" {
+  description = "Label shown on GitLab's login button for the SSO provider."
+  type        = string
+  default     = "Amnesia Labs SSO"
+}
+
 variable "cp_private_ip" {
   description = "Static private IP for the control plane, so workers can join without ordering games."
   type        = string

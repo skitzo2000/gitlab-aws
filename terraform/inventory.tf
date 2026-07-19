@@ -33,6 +33,12 @@ resource "local_sensitive_file" "ansible_group_vars" {
     runner_image         = var.runner_image
     gitlab_root_password = random_password.gitlab_root.result
 
+    keycloak_enabled       = var.keycloak_issuer_url != ""
+    keycloak_issuer_url    = var.keycloak_issuer_url
+    keycloak_client_id     = var.keycloak_client_id
+    keycloak_client_secret = var.keycloak_client_secret
+    keycloak_label         = var.keycloak_label
+
     k3s_token     = random_password.k3s_token.result
     cp_public_ip  = aws_eip.cp.public_ip
     cp_private_ip = var.cp_private_ip

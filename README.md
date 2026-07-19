@@ -46,6 +46,7 @@ Design decisions (mirrors the demo deck):
 | Runner config **pre-provisioned** | Ansible creates an instance runner through the GitLab API and templates a complete `config.toml` (kubernetes executor, privileged for dind) into a Secret — the runner pod just runs, no `register` step |
 | **Debian 13 minimal** AMI | Widest-surface-area OS avoided: official Debian cloud image, no snapd, minimal package set. SSH user is `admin` |
 | **HTTPS via omnibus Let's Encrypt** | When a domain is set, GitLab obtains and auto-renews its own cert (HTTP-01 against the DNS record Terraform manages) — no cert-manager, no manual certs. Same cert covers the registry, so dind needs no insecure-registry flag |
+| **SSO via external Keycloak** | The amnesia-labs Keycloak is the OIDC provider — nothing to deploy here, just three variables. Password login stays enabled (Keycloak is the *secondary* provider, per the demo narrative) |
 
 ## Cost (us-east-1, approximate)
 
@@ -133,6 +134,29 @@ port 80, which stays open for that + the HTTPS redirect) and auto-renews it.
 mode) the stack stays HTTP, since Let's Encrypt won't issue for sslip
 hostnames.
 
+## SSO (amnesia-labs Keycloak)
+
+GitLab federates to the existing amnesia-labs Keycloak over OIDC — the
+platform deploys nothing Keycloak-related, it just points at it:
+
+1. In Keycloak, create a **confidential client** (standard/authorization-code
+   flow) in your realm, with the redirect URI from
+   `terraform output keycloak_redirect_uri`.
+2. Set in `terraform.tfvars`:
+   ```hcl
+   keycloak_issuer_url    = "https://keycloak.amnesia-labs.com/realms/<realm>"
+   keycloak_client_id     = "gitlab"
+   keycloak_client_secret = "<from Keycloak>"
+   ```
+3. `terraform apply` + re-run the playbook. The login page grows an
+   "Amnesia Labs SSO" button (label configurable via `keycloak_label`).
+
+Users are auto-created on first SSO login (`preferred_username` becomes the
+GitLab username) and are not blocked pending admin approval — demo-friendly
+defaults, both in the omniauth block in
+`ansible/roles/gitlab/templates/gitlab.yaml.j2`. PKCE is enabled. Leaving
+`keycloak_issuer_url` empty disables the whole block.
+
 ## Knobs (terraform/variables.tf)
 
 All configuration is centralized in `terraform/variables.tf`; copy
@@ -144,6 +168,7 @@ Highlights:
 | `region` | `us-east-1` | |
 | `admin_cidr` | `0.0.0.0/0` | **Narrow to your IP** — gates SSH + k3s API |
 | `domain` / `route53_zone_id` | `""` | real DNS (see above); empty = sslip.io |
+| `keycloak_issuer_url` / `_client_id` / `_client_secret` | `""` | SSO against the amnesia-labs Keycloak; empty issuer = disabled |
 | `use_spot` | `true` | `false` for on-demand |
 | `worker_count` | `2` | |
 | `vpc_cidr` / `subnet_cidr` | `10.60.0.0/16` / `10.60.1.0/24` | avoids k3s' 10.42/10.43 |
@@ -174,11 +199,10 @@ Highlights:
 | No runner in Admin → CI/CD → Runners | `kubectl -n gitlab-runner logs deploy/gitlab-runner`; re-run the playbook |
 | Workers not joining | `journalctl -u k3s-agent` on a worker |
 | Cert not issued / readiness wait loops in HTTPS mode | Does the DNS record exist and point at the EIP? `kubectl -n gitlab logs deploy/gitlab \| grep -i letsencrypt`; LE rate limits are per-domain (5 duplicate certs/week) |
+| SSO button missing or login fails | Issuer URL must match Keycloak's realm URL exactly (discovery is on); check the client secret and that the redirect URI is registered; `kubectl -n gitlab logs deploy/gitlab \| grep -i omniauth` |
 | Ansible can't connect | Did `terraform apply` finish? Worker IPs change on stop/start — re-apply to refresh the inventory |
 | Pipeline can't push image | Did you replace `REGISTRY_HOST_PLACEHOLDER` in `.gitlab-ci.yml`? |
 
 ## What's next (per the deck)
 
-- Keycloak (self-hosted OIDC) as the secondary SSO provider — `omniauth` block
-  in `GITLAB_OMNIBUS_CONFIG` + a Keycloak deployment, as another role.
 - Wiki live-edit with the real commit SHA — no infra needed, just the demo flow.

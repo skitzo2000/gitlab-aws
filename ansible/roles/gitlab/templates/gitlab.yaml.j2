@@ -60,6 +60,34 @@ spec:
 {% endif %}
                 gitlab_rails['initial_root_password'] = '{{ gitlab_root_password }}'
                 gitlab_rails['gitlab_shell_ssh_port'] = 2222
+{% if keycloak_enabled %}
+                # SSO against the external amnesia-labs Keycloak (OIDC).
+                # Password login stays enabled — Keycloak is the secondary
+                # provider, per the demo narrative.
+                gitlab_rails['omniauth_enabled'] = true
+                gitlab_rails['omniauth_allow_single_sign_on'] = ['openid_connect']
+                gitlab_rails['omniauth_block_auto_created_users'] = false
+                gitlab_rails['omniauth_providers'] = [
+                  {
+                    name: 'openid_connect',
+                    label: '{{ keycloak_label }}',
+                    args: {
+                      name: 'openid_connect',
+                      scope: ['openid', 'profile', 'email'],
+                      response_type: 'code',
+                      issuer: '{{ keycloak_issuer_url }}',
+                      discovery: true,
+                      pkce: true,
+                      uid_field: 'preferred_username',
+                      client_options: {
+                        identifier: '{{ keycloak_client_id }}',
+                        secret: '{{ keycloak_client_secret }}',
+                        redirect_uri: '{{ gitlab_url }}/users/auth/openid_connect/callback'
+                      }
+                    }
+                  }
+                ]
+{% endif %}
                 # Trim the omnibus footprint to fit a t3a.large comfortably
                 prometheus_monitoring['enable'] = false
                 puma['worker_processes'] = 2
