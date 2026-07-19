@@ -26,7 +26,9 @@ resource "local_sensitive_file" "ansible_group_vars" {
     ansible_ssh_private_key_file = abspath(local_sensitive_file.ssh_key.filename)
 
     gitlab_host          = local.gitlab_host
-    gitlab_url           = "http://${local.gitlab_host}"
+    gitlab_url           = "${local.gitlab_scheme}://${local.gitlab_host}"
+    gitlab_https         = local.gitlab_https
+    letsencrypt_email    = local.letsencrypt_email
     gitlab_image         = var.gitlab_image
     runner_image         = var.runner_image
     gitlab_root_password = random_password.gitlab_root.result

@@ -10,12 +10,16 @@
 
 # --- Real DNS (default: free sslip.io, no setup) ----------------------------
 
-# GitLab becomes gitlab.<domain>. Requires an A record to the EIP —
-# Terraform creates it for you if the zone is in Route 53:
+# GitLab becomes gitlab.<domain>, and HTTPS via Let's Encrypt turns on
+# automatically. Requires an A record to the EIP — Terraform creates it for
+# you if the zone is in Route 53:
 # domain          = "demo.example.com"
 # route53_zone_id = "Z0123456789ABCDEFGHIJ"
 # If your DNS is hosted elsewhere, set only `domain` and create the record
-# shown by `terraform output dns_record`.
+# shown by `terraform output dns_record` BEFORE running the playbook.
+
+# Let's Encrypt contact (default: admin@<domain>)
+# letsencrypt_email = "you@example.com"
 
 # --- Sizing / cost ----------------------------------------------------------
 

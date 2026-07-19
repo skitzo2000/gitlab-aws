@@ -82,6 +82,12 @@ variable "domain" {
   default     = ""
 }
 
+variable "letsencrypt_email" {
+  description = "Contact email for Let's Encrypt registration (HTTPS is enabled automatically when var.domain is set). Defaults to admin@<domain>."
+  type        = string
+  default     = ""
+}
+
 variable "route53_zone_id" {
   description = "Route 53 hosted zone ID for var.domain. If set (and domain is set), Terraform creates the A record to the EIP itself. Leave empty if your DNS is hosted elsewhere — the dns_record output tells you what to create."
   type        = string

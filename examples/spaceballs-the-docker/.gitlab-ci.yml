@@ -1,10 +1,15 @@
 # Spaceballs-the-docker: built by the pipeline, pushed to the self-hosted
 # registry. Runs on the hosted runner (kubernetes executor, privileged dind).
 #
-# ONE EDIT REQUIRED before pushing this to your demo GitLab:
-#   replace REGISTRY_HOST_PLACEHOLDER below with `terraform output registry_host`
-#   (e.g. gitlab.1-2-3-4.sslip.io:5050). The registry is plain HTTP, so the
-#   dind daemon must be told to trust it.
+# With a real domain configured (HTTPS via Let's Encrypt), this works as-is —
+# the registry serves a publicly trusted cert.
+#
+# ONLY in sslip.io/HTTP mode: dind must be told to trust the plain-HTTP
+# registry — swap the services block for:
+#   services:
+#     - name: docker:27.3-dind
+#       alias: docker
+#       command: ["--insecure-registry=<terraform output registry_host>"]
 
 stages:
   - build
@@ -15,7 +20,6 @@ build-image:
   services:
     - name: docker:27.3-dind
       alias: docker
-      command: ["--insecure-registry=REGISTRY_HOST_PLACEHOLDER"]
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""

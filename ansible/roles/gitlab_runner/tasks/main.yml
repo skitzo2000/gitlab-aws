@@ -4,11 +4,12 @@
     path: "{{ k3s_manifests_dir }}/gitlab-runner.yaml"
   register: runner_manifest
 
-# Hits svclb's host port 80 on this node, which forwards to the GitLab pod
-# on whichever worker runs it.
+# Uses the public URL: in HTTPS mode this also proves DNS resolves and the
+# Let's Encrypt cert was issued before we go on. (Traffic hairpins through
+# the EIP to svclb on whichever node, then to the GitLab pod.)
 - name: Wait for GitLab to be ready (first boot takes ~5-8 min)
   ansible.builtin.uri:
-    url: http://localhost/-/readiness
+    url: "{{ gitlab_url }}/-/readiness"
     status_code: 200
   register: readiness
   until: readiness.status == 200
@@ -46,7 +47,7 @@
 
     - name: Create the instance runner (glrt token)
       ansible.builtin.uri:
-        url: http://localhost/api/v4/user/runners
+        url: "{{ gitlab_url }}/api/v4/user/runners"
         method: POST
         headers:
           PRIVATE-TOKEN: "{{ bootstrap_pat }}"

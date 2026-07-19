@@ -1,6 +1,6 @@
 output "gitlab_url" {
-  description = "GitLab web UI (log in as root)."
-  value       = "http://${local.gitlab_host}"
+  description = "GitLab web UI (log in as root). HTTPS via Let's Encrypt when a domain is set."
+  value       = "${local.gitlab_scheme}://${local.gitlab_host}"
 }
 
 output "registry_url" {

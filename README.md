@@ -45,6 +45,7 @@ Design decisions (mirrors the demo deck):
 | Manifests via k3s **auto-deploy dir** | Ansible just templates YAML into `/var/lib/rancher/k3s/server/manifests/` — no kubectl apply, no helm, no python k8s deps |
 | Runner config **pre-provisioned** | Ansible creates an instance runner through the GitLab API and templates a complete `config.toml` (kubernetes executor, privileged for dind) into a Secret — the runner pod just runs, no `register` step |
 | **Debian 13 minimal** AMI | Widest-surface-area OS avoided: official Debian cloud image, no snapd, minimal package set. SSH user is `admin` |
+| **HTTPS via omnibus Let's Encrypt** | When a domain is set, GitLab obtains and auto-renews its own cert (HTTP-01 against the DNS record Terraform manages) — no cert-manager, no manual certs. Same cert covers the registry, so dind needs no insecure-registry flag |
 
 ## Cost (us-east-1, approximate)
 
@@ -102,13 +103,10 @@ terraform destroy
 
 `examples/spaceballs-the-docker/` is the deck's narrative: a commit triggers a
 pipeline on the hosted runner, which **builds** Spaceballs-the-docker and pushes
-it to the self-hosted registry. Create a project in the demo GitLab, drop those
-three files in, and edit one placeholder in `.gitlab-ci.yml`
-(`REGISTRY_HOST_PLACEHOLDER` → `terraform output registry_host` — the registry
-is plain HTTP, so dind needs the `--insecure-registry` flag).
-
-To pull the image from your laptop, add the same host to your Docker daemon's
-`insecure-registries`.
+it to the self-hosted registry. Create a project in the demo GitLab and drop
+those three files in — with a domain configured (HTTPS) it works as-is,
+including `docker pull` from your laptop. Only in sslip.io/HTTP mode does dind
+need the `--insecure-registry` flag (see the comment in the `.gitlab-ci.yml`).
 
 ## DNS / pointing a domain at it
 
@@ -122,10 +120,18 @@ route53_zone_id = "Z0123456789ABCDEFGHIJ"     # optional — omit if DNS is host
 
 With a Route 53 zone ID, Terraform manages the `A` record to the EIP itself.
 Without one, `terraform output dns_record` prints the single record to create
-at your DNS host (the EIP is stable, so it's set-once). The hostname flows
-from this one variable into GitLab's `external_url`, the registry URL, and
-the runner config — after changing it, run `terraform apply` and re-run the
-playbook so GitLab reconfigures (data is untouched).
+at your DNS host (the EIP is stable, so it's set-once) — **create it before
+running the playbook**, since Let's Encrypt validates against it. The hostname
+flows from this one variable into GitLab's `external_url`, the registry URL,
+and the runner config — after changing it, run `terraform apply` and re-run
+the playbook so GitLab reconfigures (data is untouched).
+
+**Setting a domain automatically enables HTTPS.** GitLab's built-in Let's
+Encrypt integration issues the cert during the first reconfigure (HTTP-01 on
+port 80, which stays open for that + the HTTPS redirect) and auto-renews it.
+`letsencrypt_email` defaults to `admin@<domain>`. Without a domain (sslip.io
+mode) the stack stays HTTP, since Let's Encrypt won't issue for sslip
+hostnames.
 
 ## Knobs (terraform/variables.tf)
 
@@ -146,8 +152,9 @@ Highlights:
 
 ## Caveats (it's a demo, on purpose)
 
-- **HTTP only.** No TLS — sslip.io + Let's Encrypt hits rate limits, and the
-  demo doesn't need it. Hence the dind `--insecure-registry` flag.
+- **HTTPS requires a real domain.** sslip.io mode stays plain HTTP (Let's
+  Encrypt won't issue there), which is where the dind `--insecure-registry`
+  flag comes in.
 - **Data lives on worker-1's EBS volume** (k3s local-path PVC). A worker
   *stop/start* keeps it; `terraform destroy` or a worker replacement loses it.
   Fine for a rebuildable demo.
@@ -166,6 +173,7 @@ Highlights:
 | GitLab not up after ~10 min | `kubectl -n gitlab get pods`, `kubectl -n gitlab logs deploy/gitlab` |
 | No runner in Admin → CI/CD → Runners | `kubectl -n gitlab-runner logs deploy/gitlab-runner`; re-run the playbook |
 | Workers not joining | `journalctl -u k3s-agent` on a worker |
+| Cert not issued / readiness wait loops in HTTPS mode | Does the DNS record exist and point at the EIP? `kubectl -n gitlab logs deploy/gitlab \| grep -i letsencrypt`; LE rate limits are per-domain (5 duplicate certs/week) |
 | Ansible can't connect | Did `terraform apply` finish? Worker IPs change on stop/start — re-apply to refresh the inventory |
 | Pipeline can't push image | Did you replace `REGISTRY_HOST_PLACEHOLDER` in `.gitlab-ci.yml`? |
 

@@ -4,6 +4,13 @@ locals {
   # sslip.io resolves gitlab.<ip-with-dashes>.sslip.io to <ip> — free
   # wildcard DNS with zero setup, stable because the EIP is stable.
   gitlab_host = var.domain != "" ? "gitlab.${var.domain}" : "gitlab.${replace(aws_eip.cp.public_ip, ".", "-")}.sslip.io"
+
+  # HTTPS rides on the real domain: omnibus' built-in Let's Encrypt does
+  # HTTP-01 against the DNS record we manage. sslip.io mode stays HTTP
+  # (LE won't issue for sslip hostnames in practice).
+  gitlab_https      = var.domain != ""
+  gitlab_scheme     = local.gitlab_https ? "https" : "http"
+  letsencrypt_email = var.letsencrypt_email != "" ? var.letsencrypt_email : (var.domain != "" ? "admin@${var.domain}" : "")
 }
 
 # Official Debian cloud image — minimal surface area vs. Ubuntu (no snapd,
