@@ -1,0 +1,29 @@
+# Spaceballs-the-docker: built by the pipeline, pushed to the self-hosted
+# registry. Runs on the hosted runner (kubernetes executor, privileged dind).
+#
+# ONE EDIT REQUIRED before pushing this to your demo GitLab:
+#   replace REGISTRY_HOST_PLACEHOLDER below with `terraform output registry_host`
+#   (e.g. gitlab.1-2-3-4.sslip.io:5050). The registry is plain HTTP, so the
+#   dind daemon must be told to trust it.
+
+stages:
+  - build
+
+build-image:
+  stage: build
+  image: docker:27.3
+  services:
+    - name: docker:27.3-dind
+      alias: docker
+      command: ["--insecure-registry=REGISTRY_HOST_PLACEHOLDER"]
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  before_script:
+    # dind takes a few seconds to come up
+    - until docker info >/dev/null 2>&1; do sleep 2; done
+    - docker login -u gitlab-ci-token -p "$CI_JOB_TOKEN" "$CI_REGISTRY"
+  script:
+    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" -t "$CI_REGISTRY_IMAGE:latest" .
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - docker push "$CI_REGISTRY_IMAGE:latest"

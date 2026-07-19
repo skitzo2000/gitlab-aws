@@ -1,0 +1,50 @@
+output "gitlab_url" {
+  description = "GitLab web UI (log in as root)."
+  value       = "http://${local.gitlab_host}"
+}
+
+output "registry_url" {
+  description = "Container registry endpoint (HTTP — see README for the dind insecure-registry flag)."
+  value       = "${local.gitlab_host}:5050"
+}
+
+output "registry_host" {
+  description = "Value for the --insecure-registry flag in the demo pipeline's dind service."
+  value       = "${local.gitlab_host}:5050"
+}
+
+output "gitlab_root_password" {
+  description = "Initial root password."
+  value       = random_password.gitlab_root.result
+  sensitive   = true
+}
+
+output "git_ssh" {
+  description = "Git-over-SSH endpoint (port 2222)."
+  value       = "ssh://git@${local.gitlab_host}:2222"
+}
+
+output "cp_public_ip" {
+  description = "Control-plane Elastic IP (stable across stop/start)."
+  value       = aws_eip.cp.public_ip
+}
+
+output "worker_public_ips" {
+  description = "Worker public IPs (change on stop/start; nothing external points at them)."
+  value       = aws_instance.worker[*].public_ip
+}
+
+output "ssh_control_plane" {
+  description = "SSH to the control plane."
+  value       = "ssh -i ${var.project}-key.pem ubuntu@${aws_eip.cp.public_ip}"
+}
+
+output "kubeconfig_command" {
+  description = "Fetch a working kubeconfig to your machine."
+  value       = "ssh -i ${var.project}-key.pem ubuntu@${aws_eip.cp.public_ip} 'sudo cat /etc/rancher/k3s/k3s.yaml' | sed 's/127.0.0.1/${aws_eip.cp.public_ip}/' > kubeconfig && export KUBECONFIG=$PWD/kubeconfig"
+}
+
+output "runner_bootstrap_logs" {
+  description = "Watch the runner auto-registration from the control plane."
+  value       = "ssh -i ${var.project}-key.pem ubuntu@${aws_eip.cp.public_ip} 'journalctl -u runner-bootstrap -f'"
+}

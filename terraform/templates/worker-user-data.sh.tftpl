@@ -1,0 +1,9 @@
+#!/bin/bash
+# k3s worker: joins the control plane. The k3s agent service retries until
+# the CP is up, so boot order doesn't matter.
+set -euo pipefail
+
+curl -sfL https://get.k3s.io | \
+  K3S_URL="https://${cp_private_ip}:6443" \
+  K3S_TOKEN="${k3s_token}" \
+  sh -s - agent --node-label "workload=gitlab-demo"
