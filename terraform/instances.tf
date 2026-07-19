@@ -2,30 +2,6 @@ locals {
   # sslip.io resolves gitlab.<ip-with-dashes>.sslip.io to <ip> — free
   # wildcard DNS with zero setup, stable because the EIP is stable.
   gitlab_host = "gitlab.${replace(aws_eip.cp.public_ip, ".", "-")}.sslip.io"
-
-  gitlab_manifest = templatefile("${path.module}/templates/gitlab.yaml.tftpl", {
-    gitlab_image  = var.gitlab_image
-    gitlab_host   = local.gitlab_host
-    root_password = random_password.gitlab_root.result
-  })
-
-  runner_manifest = templatefile("${path.module}/templates/runner.yaml.tftpl", {
-    runner_image = var.runner_image
-    gitlab_url   = "http://${local.gitlab_host}"
-  })
-
-  cp_user_data = templatefile("${path.module}/templates/cp-user-data.sh.tftpl", {
-    k3s_token        = random_password.k3s_token.result
-    public_ip        = aws_eip.cp.public_ip
-    gitlab_manifest  = local.gitlab_manifest
-    runner_manifest  = local.runner_manifest
-    bootstrap_script = file("${path.module}/templates/bootstrap-runner.sh")
-  })
-
-  worker_user_data = templatefile("${path.module}/templates/worker-user-data.sh.tftpl", {
-    k3s_token     = random_password.k3s_token.result
-    cp_private_ip = var.cp_private_ip
-  })
 }
 
 data "aws_ami" "ubuntu" {
@@ -72,7 +48,7 @@ resource "random_password" "k3s_token" {
   special = false
 }
 
-# --- Elastic IP (allocated first so user-data can bake the URL in) ---------
+# --- Elastic IP ------------------------------------------------------------
 
 resource "aws_eip" "cp" {
   domain = "vpc"
@@ -89,20 +65,18 @@ resource "aws_eip_association" "cp" {
 
 # --- Control plane ---------------------------------------------------------
 
-# Tainted node-role.kubernetes.io/control-plane:NoSchedule at install time,
-# so no workloads ever land here — that's what lets it be a t3a.small.
-# (k3s' svclb daemonset tolerates the taint, so ports 80/5050/2222 still
-# answer on this node and forward to the GitLab pod on the workers — which
-# is why the EIP lives here.)
+# Ansible taints this node node-role.kubernetes.io/control-plane:NoSchedule
+# at k3s install time, so no workloads ever land here — that's what lets it
+# be a t3a.small. (k3s' svclb daemonset tolerates the taint, so ports
+# 80/5050/2222 still answer on this node and forward to the GitLab pod on
+# the workers — which is why the EIP lives here.)
 resource "aws_instance" "cp" {
-  ami                         = data.aws_ami.ubuntu.id
-  instance_type               = var.cp_instance_type
-  subnet_id                   = aws_subnet.public.id
-  private_ip                  = var.cp_private_ip
-  vpc_security_group_ids      = [aws_security_group.cluster.id]
-  key_name                    = aws_key_pair.this.key_name
-  user_data                   = local.cp_user_data
-  user_data_replace_on_change = true
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.cp_instance_type
+  subnet_id              = aws_subnet.public.id
+  private_ip             = var.cp_private_ip
+  vpc_security_group_ids = [aws_security_group.cluster.id]
+  key_name               = aws_key_pair.this.key_name
 
   dynamic "instance_market_options" {
     for_each = var.use_spot ? [1] : []
@@ -139,13 +113,11 @@ resource "aws_instance" "cp" {
 resource "aws_instance" "worker" {
   count = var.worker_count
 
-  ami                         = data.aws_ami.ubuntu.id
-  instance_type               = var.worker_instance_type
-  subnet_id                   = aws_subnet.public.id
-  vpc_security_group_ids      = [aws_security_group.cluster.id]
-  key_name                    = aws_key_pair.this.key_name
-  user_data                   = local.worker_user_data
-  user_data_replace_on_change = true
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.worker_instance_type
+  subnet_id              = aws_subnet.public.id
+  vpc_security_group_ids = [aws_security_group.cluster.id]
+  key_name               = aws_key_pair.this.key_name
 
   dynamic "instance_market_options" {
     for_each = var.use_spot ? [1] : []

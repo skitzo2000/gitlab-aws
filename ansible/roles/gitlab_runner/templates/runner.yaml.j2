@@ -1,6 +1,7 @@
-# Hosted GitLab Runner (kubernetes executor). Applied by bootstrap-runner.sh
-# on the control plane AFTER it has created the `runner-token` secret.
-# CI job pods spawn in this namespace and land on the workers (CP is tainted).
+# Hosted GitLab Runner (kubernetes executor). The config.toml is fully
+# pre-provisioned with the runner's auth token — no `register` step, no
+# entrypoint script; the pod just runs. CI job pods spawn in this namespace
+# and land on the workers (CP is tainted).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -35,24 +36,25 @@ subjects:
     namespace: gitlab-runner
 ---
 apiVersion: v1
-kind: ConfigMap
+kind: Secret
 metadata:
-  name: gitlab-runner-entrypoint
+  name: gitlab-runner-config
   namespace: gitlab-runner
-data:
-  entrypoint.sh: |
-    #!/bin/sh
-    set -e
-    gitlab-runner register --non-interactive \
-      --url "${gitlab_url}" \
-      --token "$RUNNER_TOKEN" \
-      --executor kubernetes \
-      --kubernetes-namespace gitlab-runner \
-      --kubernetes-privileged=true \
-      --kubernetes-image alpine:3.20 \
-      --kubernetes-pull-policy if-not-present
-    sed -i 's/^concurrent = .*/concurrent = 4/' /etc/gitlab-runner/config.toml
-    exec gitlab-runner run
+stringData:
+  config.toml: |
+    concurrent = 4
+    check_interval = 3
+
+    [[runners]]
+      name = "aws-hosted-runner"
+      url = "{{ gitlab_url }}"
+      token = "{{ runner_token }}"
+      executor = "kubernetes"
+      [runners.kubernetes]
+        namespace = "gitlab-runner"
+        privileged = true
+        image = "alpine:3.20"
+        pull_policy = "if-not-present"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -74,22 +76,17 @@ spec:
       serviceAccountName: gitlab-runner
       containers:
         - name: runner
-          image: ${runner_image}
-          command: ["/bin/sh", "/entrypoint/entrypoint.sh"]
-          env:
-            - name: RUNNER_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: runner-token
-                  key: token
+          image: {{ runner_image }}
+          command: ["gitlab-runner", "run", "--config", "/config/config.toml"]
           resources:
             requests:
               cpu: 100m
               memory: 128Mi
           volumeMounts:
-            - name: entrypoint
-              mountPath: /entrypoint
+            - name: config
+              mountPath: /config
+              readOnly: true
       volumes:
-        - name: entrypoint
-          configMap:
-            name: gitlab-runner-entrypoint
+        - name: config
+          secret:
+            secretName: gitlab-runner-config

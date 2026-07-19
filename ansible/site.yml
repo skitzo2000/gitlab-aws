@@ -1,0 +1,31 @@
+---
+# GitLab demo platform configuration. Terraform provisions the instances and
+# generates inventory/; this playbook does everything else. Idempotent —
+# re-run freely.
+
+- name: Wait for hosts to come up
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+
+- name: Control plane — k3s server (tainted) + GitLab manifest
+  hosts: control_plane
+  become: true
+  roles:
+    - k3s_server
+    - gitlab
+
+- name: Workers — join the cluster
+  hosts: workers
+  become: true
+  roles:
+    - k3s_agent
+
+- name: Hosted runner — register against GitLab and deploy
+  hosts: control_plane
+  become: true
+  roles:
+    - gitlab_runner

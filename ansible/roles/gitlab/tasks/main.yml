@@ -1,0 +1,8 @@
+---
+# k3s auto-applies (and re-applies on change) anything in its manifests dir —
+# no kubectl, no helm, no kubernetes python deps needed.
+- name: Deploy GitLab manifest
+  ansible.builtin.template:
+    src: gitlab.yaml.j2
+    dest: "{{ k3s_manifests_dir }}/gitlab-demo.yaml"
+    mode: "0600"

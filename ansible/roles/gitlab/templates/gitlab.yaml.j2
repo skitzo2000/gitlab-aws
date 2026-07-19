@@ -1,6 +1,6 @@
-# GitLab omnibus (single container) + registry, deployed by k3s' auto-deploy
-# manifest dir. The control plane is tainted, so this lands on a worker; the
-# 4Gi memory request effectively dedicates that worker to GitLab.
+# GitLab omnibus (single container) + registry. The control plane is
+# tainted, so this lands on a worker; the 4Gi memory request effectively
+# dedicates that worker to GitLab.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -44,13 +44,13 @@ spec:
     spec:
       containers:
         - name: gitlab
-          image: ${gitlab_image}
+          image: {{ gitlab_image }}
           env:
             - name: GITLAB_OMNIBUS_CONFIG
               value: |
-                external_url 'http://${gitlab_host}'
-                registry_external_url 'http://${gitlab_host}:5050'
-                gitlab_rails['initial_root_password'] = '${root_password}'
+                external_url 'http://{{ gitlab_host }}'
+                registry_external_url 'http://{{ gitlab_host }}:5050'
+                gitlab_rails['initial_root_password'] = '{{ gitlab_root_password }}'
                 gitlab_rails['gitlab_shell_ssh_port'] = 2222
                 # Trim the omnibus footprint to fit a t3a.large comfortably
                 prometheus_monitoring['enable'] = false
