@@ -24,6 +24,15 @@ output "git_ssh" {
   value       = "ssh://git@${local.gitlab_host}:2222"
 }
 
+output "dns_record" {
+  description = "DNS state: what Terraform manages, or the record you need to create."
+  value = (
+    var.domain == "" ? "none needed — using sslip.io (${local.gitlab_host})" :
+    var.route53_zone_id != "" ? "managed by Terraform in Route 53: ${local.gitlab_host} A ${aws_eip.cp.public_ip}" :
+    "create at your DNS host: ${local.gitlab_host}  A  ${aws_eip.cp.public_ip}  (TTL 300)"
+  )
+}
+
 output "cp_public_ip" {
   description = "Control-plane Elastic IP (stable across stop/start)."
   value       = aws_eip.cp.public_ip

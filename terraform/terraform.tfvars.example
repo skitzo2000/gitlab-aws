@@ -1,0 +1,38 @@
+# Copy to terraform.tfvars (gitignored) and adjust. Everything here is
+# optional — defaults live in variables.tf.
+
+# --- You almost certainly want these two ------------------------------------
+
+# Lock SSH + k3s API down to your own IP.
+# admin_cidr = "203.0.113.7/32"
+
+# region = "us-east-1"
+
+# --- Real DNS (default: free sslip.io, no setup) ----------------------------
+
+# GitLab becomes gitlab.<domain>. Requires an A record to the EIP —
+# Terraform creates it for you if the zone is in Route 53:
+# domain          = "demo.example.com"
+# route53_zone_id = "Z0123456789ABCDEFGHIJ"
+# If your DNS is hosted elsewhere, set only `domain` and create the record
+# shown by `terraform output dns_record`.
+
+# --- Sizing / cost ----------------------------------------------------------
+
+# use_spot             = true
+# cp_instance_type     = "t3a.small"
+# worker_instance_type = "t3a.large"
+# worker_count         = 2
+# cp_volume_gb         = 20
+# worker_volume_gb     = 40
+
+# --- Network (defaults avoid k3s' internal 10.42/10.43 ranges) --------------
+
+# vpc_cidr      = "10.60.0.0/16"
+# subnet_cidr   = "10.60.1.0/24"
+# cp_private_ip = "10.60.1.10"
+
+# --- Software versions ------------------------------------------------------
+
+# gitlab_image = "gitlab/gitlab-ce:18.5.0-ce.0"
+# runner_image = "gitlab/gitlab-runner:alpine-v18.5.0"

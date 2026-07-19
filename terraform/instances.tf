@@ -1,7 +1,9 @@
 locals {
+  # One hostname drives everything (GitLab external_url, registry, runner
+  # config, outputs). With a real domain set, it's gitlab.<domain>; otherwise
   # sslip.io resolves gitlab.<ip-with-dashes>.sslip.io to <ip> — free
   # wildcard DNS with zero setup, stable because the EIP is stable.
-  gitlab_host = "gitlab.${replace(aws_eip.cp.public_ip, ".", "-")}.sslip.io"
+  gitlab_host = var.domain != "" ? "gitlab.${var.domain}" : "gitlab.${replace(aws_eip.cp.public_ip, ".", "-")}.sslip.io"
 }
 
 # Official Debian cloud image — minimal surface area vs. Ubuntu (no snapd,

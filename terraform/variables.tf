@@ -76,6 +76,18 @@ variable "subnet_cidr" {
   default     = "10.60.1.0/24"
 }
 
+variable "domain" {
+  description = "Real domain for the platform (e.g. demo.example.com). GitLab becomes gitlab.<domain>. Leave empty to use free sslip.io wildcard DNS (gitlab.<eip>.sslip.io)."
+  type        = string
+  default     = ""
+}
+
+variable "route53_zone_id" {
+  description = "Route 53 hosted zone ID for var.domain. If set (and domain is set), Terraform creates the A record to the EIP itself. Leave empty if your DNS is hosted elsewhere — the dns_record output tells you what to create."
+  type        = string
+  default     = ""
+}
+
 variable "cp_private_ip" {
   description = "Static private IP for the control plane, so workers can join without ordering games."
   type        = string

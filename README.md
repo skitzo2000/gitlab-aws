@@ -110,14 +110,37 @@ is plain HTTP, so dind needs the `--insecure-registry` flag).
 To pull the image from your laptop, add the same host to your Docker daemon's
 `insecure-registries`.
 
+## DNS / pointing a domain at it
+
+Default is `sslip.io` wildcard DNS — zero setup, the URL embeds the EIP.
+To use a real domain, set it in your `terraform.tfvars`:
+
+```hcl
+domain          = "demo.example.com"          # GitLab becomes gitlab.demo.example.com
+route53_zone_id = "Z0123456789ABCDEFGHIJ"     # optional — omit if DNS is hosted elsewhere
+```
+
+With a Route 53 zone ID, Terraform manages the `A` record to the EIP itself.
+Without one, `terraform output dns_record` prints the single record to create
+at your DNS host (the EIP is stable, so it's set-once). The hostname flows
+from this one variable into GitLab's `external_url`, the registry URL, and
+the runner config — after changing it, run `terraform apply` and re-run the
+playbook so GitLab reconfigures (data is untouched).
+
 ## Knobs (terraform/variables.tf)
+
+All configuration is centralized in `terraform/variables.tf`; copy
+`terraform.tfvars.example` to `terraform.tfvars` (gitignored) to override.
+Highlights:
 
 | Variable | Default | Note |
 |---|---|---|
 | `region` | `us-east-1` | |
 | `admin_cidr` | `0.0.0.0/0` | **Narrow to your IP** — gates SSH + k3s API |
+| `domain` / `route53_zone_id` | `""` | real DNS (see above); empty = sslip.io |
 | `use_spot` | `true` | `false` for on-demand |
 | `worker_count` | `2` | |
+| `vpc_cidr` / `subnet_cidr` | `10.60.0.0/16` / `10.60.1.0/24` | avoids k3s' 10.42/10.43 |
 | `gitlab_image` | `gitlab/gitlab-ce:18.5.0-ce.0` | bump as needed |
 | `runner_image` | `gitlab/gitlab-runner:alpine-v18.5.0` | keep in step with GitLab |
 
