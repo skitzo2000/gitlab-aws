@@ -29,10 +29,3 @@
   become: true
   roles:
     - gitlab_runner
-
-- name: Gitea — the demo's third forge
-  hosts: control_plane
-  become: true
-  roles:
-    - role: gitea
-      when: gitea_enabled | bool

@@ -33,12 +33,6 @@ resource "local_sensitive_file" "ansible_group_vars" {
     runner_image         = var.runner_image
     gitlab_root_password = random_password.gitlab_root.result
 
-    gitea_enabled        = var.gitea_enabled
-    gitea_image          = var.gitea_image
-    gitea_host           = local.gitea_host
-    gitea_url            = "http://${local.gitea_host}:3000"
-    gitea_admin_password = random_password.gitea_admin.result
-
     keycloak_enabled       = var.keycloak_issuer_url != ""
     keycloak_issuer_url    = var.keycloak_issuer_url
     keycloak_client_id     = var.keycloak_client_id

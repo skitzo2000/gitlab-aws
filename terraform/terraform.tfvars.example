@@ -9,10 +9,12 @@
 #   STEP 1  region + lock down admin access        (do this for every deploy)
 #   STEP 2  real domain -> automatic HTTPS         (needed for STEP 3)
 #   STEP 3  SSO via the amnesia-labs Keycloak
-#   STEP 4  Gitea, the demo's third forge          (on by default)
-#   STEP 5  sizing & cost
-#   STEP 6  software versions
-#   STEP 7  network layout                         (rarely)
+#   STEP 4  sizing & cost
+#   STEP 5  software versions
+#   STEP 6  network layout                         (rarely)
+#
+# (The existing amnesia-labs Gitea is part of the DEMO, not this stack —
+# GitLab pulls the spaceballs repo from it via Import by URL. See README.)
 #
 # Full reference with all defaults: variables.tf
 # Misconfigurations (e.g. SSO without a domain) fail at `terraform plan`
@@ -71,19 +73,7 @@
 # keycloak_label         = "Amnesia Labs SSO"
 
 # -----------------------------------------------------------------------------
-# STEP 4 — Gitea (the demo's third forge, on by default)
-# -----------------------------------------------------------------------------
-# Closes the arc: GitHub runs the pipeline that builds the platform, GitLab
-# builds Spaceballs-the-docker into its registry, Gitea mirrors the repo and
-# pulls the image at the end. Web + container registry at
-# http://gitea.<host>:3000, admin user "gitea_admin"
-# (password: terraform output -raw gitea_admin_password).
-
-# gitea_enabled = true
-# gitea_image   = "gitea/gitea:1.24"
-
-# -----------------------------------------------------------------------------
-# STEP 5 — Sizing & cost
+# STEP 4 — Sizing & cost
 # -----------------------------------------------------------------------------
 # Defaults: 1x t3a.small control plane (tainted, workload-free) +
 # 2x t3a.large workers, all AMD persistent spot — ~$0.09/hr running,
@@ -97,7 +87,7 @@
 # worker_volume_gb     = 40
 
 # -----------------------------------------------------------------------------
-# STEP 6 — Software versions
+# STEP 5 — Software versions
 # -----------------------------------------------------------------------------
 # Keep the runner's minor version in step with GitLab's.
 
@@ -105,7 +95,7 @@
 # runner_image = "gitlab/gitlab-runner:alpine-v18.5.0"
 
 # -----------------------------------------------------------------------------
-# STEP 7 — Network layout (rarely needed)
+# STEP 6 — Network layout (rarely needed)
 # -----------------------------------------------------------------------------
 # Defaults avoid k3s' internal ranges (10.42.0.0/16 pods, 10.43.0.0/16
 # services). cp_private_ip must sit inside subnet_cidr.

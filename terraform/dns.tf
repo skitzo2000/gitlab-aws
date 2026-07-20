@@ -11,13 +11,3 @@ resource "aws_route53_record" "gitlab" {
   ttl     = 300
   records = [aws_eip.cp.public_ip]
 }
-
-resource "aws_route53_record" "gitea" {
-  count = var.domain != "" && var.route53_zone_id != "" && var.gitea_enabled ? 1 : 0
-
-  zone_id = var.route53_zone_id
-  name    = local.gitea_host
-  type    = "A"
-  ttl     = 300
-  records = [aws_eip.cp.public_ip]
-}
