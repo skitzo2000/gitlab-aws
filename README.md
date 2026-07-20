@@ -1,6 +1,6 @@
 # GitLab Demo Platform — AWS + Terraform + Ansible
 
-Self-hosted GitLab for the demo, built to be **cheap, disposable, and two-command**:
+Self-hosted GitLab for demos, built to be **cheap, disposable, and two-command**:
 `terraform apply` provisions the infrastructure, `ansible-playbook site.yml`
 configures it. `terraform destroy` deletes every trace.
 
