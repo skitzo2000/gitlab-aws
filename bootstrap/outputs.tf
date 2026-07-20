@@ -24,8 +24,8 @@ output "github_setup" {
     # gh variable set GITLAB_DOMAIN    --body "demo.example.com"
     # gh variable set ROUTE53_ZONE_ID  --body "${var.route53_zone_id != "" ? var.route53_zone_id : "Z..."}"
 
-    # Optional — amnesia-labs Keycloak SSO (STEP 3):
-    # gh variable set KEYCLOAK_ISSUER_URL --body "https://keycloak.amnesia-labs.com/realms/<realm>"
+    # Optional — Keycloak SSO (STEP 3):
+    # gh variable set KEYCLOAK_ISSUER_URL --body "https://keycloak.example.com/realms/<realm>"
     # gh variable set KEYCLOAK_CLIENT_ID  --body "gitlab"
     # gh secret  set KEYCLOAK_CLIENT_SECRET
   EOT

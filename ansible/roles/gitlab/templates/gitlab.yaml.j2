@@ -61,7 +61,7 @@ spec:
                 gitlab_rails['initial_root_password'] = '{{ gitlab_root_password }}'
                 gitlab_rails['gitlab_shell_ssh_port'] = 2222
 {% if keycloak_enabled %}
-                # SSO against the external amnesia-labs Keycloak (OIDC).
+                # SSO against an external Keycloak (OIDC).
                 # Password login stays enabled alongside SSO.
                 gitlab_rails['omniauth_enabled'] = true
                 gitlab_rails['omniauth_allow_single_sign_on'] = ['openid_connect']
