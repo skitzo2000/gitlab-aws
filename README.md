@@ -33,7 +33,7 @@ default package set); Terraform generates the Ansible inventory and hands off.
    └─────────────────────────────────────────────────────────────────┘
 ```
 
-Design decisions (mirrors the demo deck):
+Design decisions:
 
 | Decision | Why |
 |---|---|
@@ -46,7 +46,7 @@ Design decisions (mirrors the demo deck):
 | Runner config **pre-provisioned** | Ansible creates an instance runner through the GitLab API and templates a complete `config.toml` (kubernetes executor, privileged for dind) into a Secret — the runner pod just runs, no `register` step |
 | **Debian 13 minimal** AMI | Widest-surface-area OS avoided: official Debian cloud image, no snapd, minimal package set. SSH user is `admin` |
 | **HTTPS via omnibus Let's Encrypt** | When a domain is set, GitLab obtains and auto-renews its own cert (HTTP-01 against the DNS record Terraform manages) — no cert-manager, no manual certs. Same cert covers the registry, so dind needs no insecure-registry flag |
-| **SSO via external Keycloak** | The amnesia-labs Keycloak is the OIDC provider — nothing to deploy here, just three variables. Password login stays enabled (Keycloak is the *secondary* provider, per the demo narrative) |
+| **SSO via external Keycloak** | The amnesia-labs Keycloak is the OIDC provider — nothing to deploy here, just three variables. Password login stays enabled alongside SSO |
 
 ## Cost (us-east-1, approximate)
 
@@ -139,38 +139,25 @@ Tear down:
 terraform destroy
 ```
 
-## The demo arc: three forges, GitLab in the spotlight
+## What the platform provides
 
-The demo shows competence across containers and all three forges — GitHub
-and Gitea in supporting roles, **GitLab as the focus**:
+Facts any project/pipeline in this GitLab can rely on:
 
-1. **GitHub** (supporting) — this repo: push to `main` and the Actions
-   pipeline (OIDC, no stored creds) builds the entire GitLab platform on AWS.
-2. **Gitea** (supporting) — the already-running amnesia-labs Gitea hosts
-   the `spaceballs-the-docker` project. **This stack deploys nothing to it
-   and touches nothing in it** — it's simply the source GitLab will pull
-   from.
-3. **GitLab** (the star) — live on stage:
-   - **Pull from Gitea**: *New project → Import project → Repository by
-     URL*, paste the repo's Gitea clone URL — cross-forge pull, on camera.
-     (Import-by-URL because GitLab-native *pull mirroring* is a Premium
-     feature and this is CE; Gitea-side *push mirroring* to GitLab is the
-     free continuous-sync alternative.)
-   - The imported project's pipeline runs on the **hosted runner**, builds
-     the image, and pushes it to **GitLab's own registry**.
-   - Close with `docker run` from the registry — *"They've gone to plaid."*
-
-Platform facts any pipeline in this GitLab can rely on: `CI_REGISTRY*`
-variables are auto-populated (registry at `terraform output registry_host`),
-`docker login -u gitlab-ci-token -p "$CI_JOB_TOKEN" "$CI_REGISTRY"` works,
-and the runner allows privileged dind. In sslip.io/HTTP mode only, a dind
-service needs `command: ["--insecure-registry=<registry_host>"]`; with a
-domain (HTTPS) no special flags at all.
-
-One reachability note: the GitLab instance (on AWS) must be able to reach
-the Gitea URL to import — Gitea needs to be internet-reachable or tunneled.
-If its hostname resolves to a private IP, also allow it under GitLab
-*Admin → Settings → Network → Outbound requests*.
+- `CI_REGISTRY*` variables are auto-populated; the registry is at
+  `terraform output registry_host`, and
+  `docker login -u gitlab-ci-token -p "$CI_JOB_TOKEN" "$CI_REGISTRY"` works
+  in jobs.
+- The hosted runner (kubernetes executor) runs untagged jobs and allows
+  **privileged dind**. In sslip.io/HTTP mode only, a dind service needs
+  `command: ["--insecure-registry=<registry_host>"]`; with a domain (HTTPS)
+  no special flags are needed.
+- **Importing repos from an external forge** (*New project → Import
+  project → Repository by URL*) works with any source this instance can
+  reach. Note: GitLab-native *pull mirroring* is a Premium feature — on CE,
+  import-by-URL is the pull path (source-side *push mirroring* into GitLab
+  is the free continuous-sync alternative). If a source hostname resolves
+  to a private IP, allow it under *Admin → Settings → Network → Outbound
+  requests*.
 
 ## DNS / pointing a domain at it
 
@@ -281,9 +268,5 @@ depends on) — checks live on the generated group_vars file in
 | Cert not issued / readiness wait loops in HTTPS mode | Does the DNS record exist and point at the EIP? `kubectl -n gitlab logs deploy/gitlab \| grep -i letsencrypt`; LE rate limits are per-domain (5 duplicate certs/week) |
 | SSO button missing or login fails | Issuer URL must match Keycloak's realm URL exactly (discovery is on); check the client secret and that the redirect URI is registered; `kubectl -n gitlab logs deploy/gitlab \| grep -i omniauth` |
 | Ansible can't connect | Did `terraform apply` finish? Worker IPs change on stop/start — re-apply to refresh the inventory |
-| Import from Gitea fails | GitLab (on AWS) must reach the Gitea URL; if it resolves to a private IP, allow it in *Admin → Settings → Network → Outbound requests* |
+| Repo import by URL fails | GitLab (on AWS) must reach the source URL; if it resolves to a private IP, allow it in *Admin → Settings → Network → Outbound requests* |
 | CI deploy fails at AssumeRole | Bootstrap run? Repo variables set (`terraform output github_setup`)? Workflow must run on `main` — the role trusts only that branch |
-
-## What's next (per the deck)
-
-- Wiki live-edit with the real commit SHA — no infra needed, just the demo flow.

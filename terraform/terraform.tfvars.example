@@ -13,9 +13,6 @@
 #   STEP 5  software versions
 #   STEP 6  network layout                         (rarely)
 #
-# (The existing amnesia-labs Gitea is part of the DEMO, not this stack —
-# GitLab pulls the spaceballs repo from it via Import by URL. See README.)
-#
 # Full reference with all defaults: variables.tf
 # Misconfigurations (e.g. SSO without a domain) fail at `terraform plan`
 # with a message pointing at the step to fix.

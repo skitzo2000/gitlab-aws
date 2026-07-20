@@ -17,9 +17,6 @@
 #   5. Sizing & cost     — instance types, spot, volumes
 #   6. Software versions — GitLab / runner images
 #   7. Network           — VPC layout (rarely needs touching)
-#
-# (The demo also involves the existing amnesia-labs Gitea as the source
-# GitLab pulls from — external, nothing to configure here. See README.)
 
 # --- 1. Basics ---------------------------------------------------------------
 

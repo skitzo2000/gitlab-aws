@@ -62,8 +62,7 @@ spec:
                 gitlab_rails['gitlab_shell_ssh_port'] = 2222
 {% if keycloak_enabled %}
                 # SSO against the external amnesia-labs Keycloak (OIDC).
-                # Password login stays enabled — Keycloak is the secondary
-                # provider, per the demo narrative.
+                # Password login stays enabled alongside SSO.
                 gitlab_rails['omniauth_enabled'] = true
                 gitlab_rails['omniauth_allow_single_sign_on'] = ['openid_connect']
                 gitlab_rails['omniauth_block_auto_created_users'] = false
