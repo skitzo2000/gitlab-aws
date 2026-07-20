@@ -1,0 +1,186 @@
+# GitLab omnibus (single container) + registry. The control plane is
+# tainted, so this lands on a worker; the 4Gi memory request effectively
+# dedicates that worker to GitLab.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab-runner
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-data
+  namespace: gitlab
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab
+  namespace: gitlab
+  labels:
+    app: gitlab
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: gitlab
+  template:
+    metadata:
+      labels:
+        app: gitlab
+    spec:
+      containers:
+        - name: gitlab
+          image: {{ gitlab_image }}
+          env:
+            - name: GITLAB_OMNIBUS_CONFIG
+              value: |
+                external_url '{{ gitlab_url }}'
+{% if gitlab_https %}
+                registry_external_url 'https://{{ gitlab_host }}:5050'
+                letsencrypt['enable'] = true
+                letsencrypt['contact_emails'] = ['{{ letsencrypt_email }}']
+                letsencrypt['auto_renew'] = true
+                nginx['redirect_http_to_https'] = true
+{% else %}
+                registry_external_url 'http://{{ gitlab_host }}:5050'
+{% endif %}
+                gitlab_rails['initial_root_password'] = '{{ gitlab_root_password }}'
+                gitlab_rails['gitlab_shell_ssh_port'] = 2222
+{% if keycloak_enabled %}
+                # SSO against the external amnesia-labs Keycloak (OIDC).
+                # Password login stays enabled alongside SSO.
+                gitlab_rails['omniauth_enabled'] = true
+                gitlab_rails['omniauth_allow_single_sign_on'] = ['openid_connect']
+                gitlab_rails['omniauth_block_auto_created_users'] = false
+                gitlab_rails['omniauth_providers'] = [
+                  {
+                    name: 'openid_connect',
+                    label: '{{ keycloak_label }}',
+                    args: {
+                      name: 'openid_connect',
+                      scope: ['openid', 'profile', 'email'],
+                      response_type: 'code',
+                      issuer: '{{ keycloak_issuer_url }}',
+                      discovery: true,
+                      pkce: true,
+                      uid_field: 'preferred_username',
+                      client_options: {
+                        identifier: '{{ keycloak_client_id }}',
+                        secret: '{{ keycloak_client_secret }}',
+                        redirect_uri: '{{ gitlab_url }}/users/auth/openid_connect/callback'
+                      }
+                    }
+                  }
+                ]
+{% endif %}
+                # Trim the omnibus footprint to fit a t3a.large comfortably
+                prometheus_monitoring['enable'] = false
+                puma['worker_processes'] = 2
+                sidekiq['max_concurrency'] = 10
+          ports:
+            - containerPort: 80
+              name: http
+            - containerPort: 443
+              name: https
+            - containerPort: 22
+              name: ssh
+            - containerPort: 5050
+              name: registry
+          resources:
+            requests:
+              cpu: 500m
+              memory: 4Gi
+            limits:
+              memory: 6Gi
+{% if gitlab_https %}
+{# Probe 443 directly: with the HTTP->HTTPS redirect active, port 80 would
+   answer 301 (a probe "success") as soon as nginx is up, long before rails.
+   kubelet skips certificate validation on HTTPS probes. #}
+          startupProbe:
+            httpGet:
+              path: /-/readiness
+              port: 443
+              scheme: HTTPS
+            periodSeconds: 15
+            failureThreshold: 80 # first reconfigure + LE issuance takes ~5-8 min
+          livenessProbe:
+            httpGet:
+              path: /-/liveness
+              port: 443
+              scheme: HTTPS
+            periodSeconds: 30
+            timeoutSeconds: 10
+{% else %}
+          startupProbe:
+            httpGet:
+              path: /-/readiness
+              port: 80
+            periodSeconds: 15
+            failureThreshold: 80 # first reconfigure takes ~5-8 min
+          livenessProbe:
+            httpGet:
+              path: /-/liveness
+              port: 80
+            periodSeconds: 30
+            timeoutSeconds: 10
+{% endif %}
+          volumeMounts:
+            - name: data
+              subPath: config
+              mountPath: /etc/gitlab
+            - name: data
+              subPath: logs
+              mountPath: /var/log/gitlab
+            - name: data
+              subPath: data
+              mountPath: /var/opt/gitlab
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: gitlab-data
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+---
+# type LoadBalancer -> k3s svclb binds host ports 80/5050/2222 on every node
+# (it tolerates the control-plane taint), so the control plane's EIP is the
+# single stable entry point regardless of which worker runs the pod.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitlab
+  namespace: gitlab
+spec:
+  type: LoadBalancer
+  selector:
+    app: gitlab
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+    - name: https
+      port: 443
+      targetPort: 443
+    - name: registry
+      port: 5050
+      targetPort: 5050
+    - name: ssh
+      port: 2222
+      targetPort: 22

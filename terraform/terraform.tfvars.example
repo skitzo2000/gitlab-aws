@@ -1,0 +1,102 @@
+# =============================================================================
+# GitLab Demo Platform — configuration walkthrough
+# =============================================================================
+# Copy this file to terraform.tfvars (gitignored) and work through the steps
+# top to bottom. Everything is optional: an EMPTY terraform.tfvars gives you
+# a working HTTP demo at http://gitlab.<eip>.sslip.io — each step below
+# unlocks one capability on top of that.
+#
+#   STEP 1  region + lock down admin access        (do this for every deploy)
+#   STEP 2  real domain -> automatic HTTPS         (needed for STEP 3)
+#   STEP 3  SSO via the amnesia-labs Keycloak
+#   STEP 4  sizing & cost
+#   STEP 5  software versions
+#   STEP 6  network layout                         (rarely)
+#
+# Full reference with all defaults: variables.tf
+# Misconfigurations (e.g. SSO without a domain) fail at `terraform plan`
+# with a message pointing at the step to fix.
+#
+# After any change:
+#   terraform apply && (cd ../ansible && ansible-playbook site.yml)
+
+# -----------------------------------------------------------------------------
+# STEP 1 — Region + admin access
+# -----------------------------------------------------------------------------
+# admin_cidr gates SSH (22) and the k3s API (6443). Default is 0.0.0.0/0;
+# set it to your own IP. (GitLab's public ports stay public regardless.)
+
+# region     = "us-east-1"
+# admin_cidr = "203.0.113.7/32"
+
+# Prefix for all AWS resource names (and the SSH key file):
+# project = "gitlab-demo"
+
+# -----------------------------------------------------------------------------
+# STEP 2 — Real domain -> automatic HTTPS
+# -----------------------------------------------------------------------------
+# Setting `domain` switches every URL to gitlab.<domain> and turns on HTTPS:
+# GitLab's built-in Let's Encrypt issues the cert against the DNS record and
+# auto-renews it. The same cert covers the container registry, so docker
+# pushes/pulls need no insecure-registry workarounds.
+#
+#   a) Zone hosted in Route 53: set both values — Terraform creates and owns
+#      the A record, nothing manual.
+#   b) DNS hosted elsewhere: set only `domain`, then create the A record
+#      printed by `terraform output dns_record` BEFORE running the playbook
+#      (Let's Encrypt validates against it).
+
+# domain          = "demo.example.com"
+# route53_zone_id = "Z0123456789ABCDEFGHIJ"
+
+# Let's Encrypt contact. Default: admin@<domain>.
+# letsencrypt_email = "you@example.com"
+
+# -----------------------------------------------------------------------------
+# STEP 3 — SSO via the amnesia-labs Keycloak (requires STEP 2)
+# -----------------------------------------------------------------------------
+# GitLab federates to the existing Keycloak over OIDC; nothing is deployed.
+# One-time setup on the Keycloak side:
+#   1. In your realm, create a CONFIDENTIAL client (standard flow),
+#      client ID "gitlab" (or set keycloak_client_id to match).
+#   2. Register the redirect URI from:  terraform output keycloak_redirect_uri
+#   3. Copy the client secret here.
+# The login page then shows an "Amnesia Labs SSO" button next to password
+# login. Users are auto-created on first SSO login.
+
+# keycloak_issuer_url    = "https://keycloak.amnesia-labs.com/realms/<realm>"
+# keycloak_client_id     = "gitlab"
+# keycloak_client_secret = "<from Keycloak>"
+# keycloak_label         = "Amnesia Labs SSO"
+
+# -----------------------------------------------------------------------------
+# STEP 4 — Sizing & cost
+# -----------------------------------------------------------------------------
+# Defaults: 1x t3a.small control plane (tainted, workload-free) +
+# 2x t3a.large workers, all AMD persistent spot — ~$0.09/hr running,
+# ~$0.02/hr stopped. Spot reclaims STOP (not terminate) the instances.
+
+# use_spot             = true
+# cp_instance_type     = "t3a.small"
+# worker_instance_type = "t3a.large"
+# worker_count         = 2
+# cp_volume_gb         = 20
+# worker_volume_gb     = 40
+
+# -----------------------------------------------------------------------------
+# STEP 5 — Software versions
+# -----------------------------------------------------------------------------
+# Keep the runner's minor version in step with GitLab's.
+
+# gitlab_image = "gitlab/gitlab-ce:18.5.0-ce.0"
+# runner_image = "gitlab/gitlab-runner:alpine-v18.5.0"
+
+# -----------------------------------------------------------------------------
+# STEP 6 — Network layout (rarely needed)
+# -----------------------------------------------------------------------------
+# Defaults avoid k3s' internal ranges (10.42.0.0/16 pods, 10.43.0.0/16
+# services). cp_private_ip must sit inside subnet_cidr.
+
+# vpc_cidr      = "10.60.0.0/16"
+# subnet_cidr   = "10.60.1.0/24"
+# cp_private_ip = "10.60.1.10"

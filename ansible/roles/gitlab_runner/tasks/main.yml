@@ -1,0 +1,69 @@
+---
+- name: Check whether the runner is already deployed
+  ansible.builtin.stat:
+    path: "{{ k3s_manifests_dir }}/gitlab-runner.yaml"
+  register: runner_manifest
+
+# Uses the public URL: in HTTPS mode this also proves DNS resolves and the
+# Let's Encrypt cert was issued before we go on. (Traffic hairpins through
+# the EIP to svclb on whichever node, then to the GitLab pod.)
+- name: Wait for GitLab to be ready (first boot takes ~5-8 min)
+  ansible.builtin.uri:
+    url: "{{ gitlab_url }}/-/readiness"
+    status_code: 200
+  register: readiness
+  until: readiness.status == 200
+  retries: 60
+  delay: 15
+
+- name: Create the runner and deploy it
+  when: not runner_manifest.stat.exists
+  block:
+    - name: Generate a bootstrap admin token
+      ansible.builtin.set_fact:
+        bootstrap_pat: "glpat-{{ lookup('ansible.builtin.password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+
+    # The only step with no API alternative: the very first admin token has
+    # to be seeded through the rails console.
+    - name: Seed the bootstrap token via gitlab-rails
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - -n
+          - gitlab
+          - exec
+          - deploy/gitlab
+          - --
+          - gitlab-rails
+          - runner
+          - >-
+            u = User.find_by_username('root');
+            t = u.personal_access_tokens.create!(scopes: ['api', 'create_runner'],
+            name: 'runner-bootstrap', expires_at: 90.days.from_now);
+            t.set_token('{{ bootstrap_pat }}');
+            t.save!
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Create the instance runner (glrt token)
+      ansible.builtin.uri:
+        url: "{{ gitlab_url }}/api/v4/user/runners"
+        method: POST
+        headers:
+          PRIVATE-TOKEN: "{{ bootstrap_pat }}"
+        body_format: form-urlencoded
+        body:
+          runner_type: instance_type
+          description: aws-hosted-runner
+          run_untagged: "true"
+          tag_list: docker,aws,demo
+        status_code: 201
+      register: runner_create
+
+    - name: Deploy the runner manifest (k3s auto-applies)
+      ansible.builtin.template:
+        src: runner.yaml.j2
+        dest: "{{ k3s_manifests_dir }}/gitlab-runner.yaml"
+        mode: "0600"
+      vars:
+        runner_token: "{{ runner_create.json.token }}"
