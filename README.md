@@ -106,6 +106,39 @@ That's it. From then on:
   `ROUTE53_ZONE_ID`, `KEYCLOAK_ISSUER_URL`, `KEYCLOAK_CLIENT_ID`) and one
   secret (`KEYCLOAK_CLIENT_SECRET`) — same knobs as the tfvars walkthrough.
 
+## Seeding the demo content
+
+A demo cluster is only convincing with something *in* it. `scripts/seed-demo.sh`
+populates the fresh GitLab with a real project — full commit history, a
+project wiki, and a first set of pipeline runs — from any repo your machine
+can clone (typically a private forge on your own network, which is exactly
+why this step runs locally instead of in CI):
+
+```bash
+scripts/seed-demo.sh --source <clone-url-of-your-demo-repo>
+```
+
+What it does, over GitLab's public HTTP API only (it works even when the
+admin plane is IP-scoped to the CI runner that deployed):
+
+1. Exchanges the root password (from the shared Terraform state; or pass
+   `GITLAB_TOKEN`) for an API token.
+2. Creates the project (public, so the audience can browse anonymously).
+3. Pushes **all branches and tags** — the full history arrives intact.
+4. If the source repo has a `wiki/` directory of markdown pages, publishes
+   it as the **project wiki** (page-per-commit, `[[links]]` work).
+5. Pushes a couple of follow-up commits (`--extra-commits N`, default 2),
+   spaced out, so *CI/CD → Pipelines* shows a build history, not a lone run.
+
+The source repo brings its own `.gitlab-ci.yml`; each seeded push triggers
+the hosted runner, so by the time you present, the registry already holds
+per-commit images. The script prints the project / pipelines / wiki /
+registry URLs to put on screen.
+
+Requirements on the demo repo: nothing beyond a `.gitlab-ci.yml` that
+builds with dind (see [What the platform provides](#what-the-platform-provides))
+and, optionally, that `wiki/` directory.
+
 ## Manual usage (no CI)
 
 ```bash
