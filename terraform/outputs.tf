@@ -30,12 +30,23 @@ output "keycloak_redirect_uri" {
 }
 
 output "dns_record" {
-  description = "DNS state: what Terraform manages, or the record you need to create."
+  description = "DNS state: what Terraform manages, or the records you need to create."
   value = (
-    var.domain == "" ? "none needed — using sslip.io (${local.gitlab_host})" :
-    var.route53_zone_id != "" ? "managed by Terraform in Route 53: ${local.gitlab_host} A ${aws_eip.cp.public_ip}" :
-    "create at your DNS host: ${local.gitlab_host}  A  ${aws_eip.cp.public_ip}  (TTL 300)"
+    var.domain == "" ? "none needed — using sslip.io (${local.gitlab_host}${var.gitea_enabled ? ", ${local.gitea_host}" : ""})" :
+    var.route53_zone_id != "" ? "managed by Terraform in Route 53: ${local.gitlab_host}${var.gitea_enabled ? " + ${local.gitea_host}" : ""} A ${aws_eip.cp.public_ip}" :
+    "create at your DNS host (TTL 300): ${local.gitlab_host}  A  ${aws_eip.cp.public_ip}${var.gitea_enabled ? " | ${local.gitea_host}  A  ${aws_eip.cp.public_ip}" : ""}"
   )
+}
+
+output "gitea_url" {
+  description = "Gitea web UI + container registry (log in as gitea_admin)."
+  value       = var.gitea_enabled ? "http://${local.gitea_host}:3000" : "disabled"
+}
+
+output "gitea_admin_password" {
+  description = "Gitea admin password (user: gitea_admin)."
+  value       = random_password.gitea_admin.result
+  sensitive   = true
 }
 
 output "cp_public_ip" {

@@ -1,0 +1,57 @@
+name: destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy" to tear the platform down'
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: gitlab-demo-terraform
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    if: inputs.confirm == 'destroy'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_region: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Point Terraform at remote state
+        run: |
+          cat > backend_override.tf <<EOF
+          terraform {
+            backend "s3" {
+              bucket         = "${{ vars.TF_STATE_BUCKET }}"
+              key            = "gitlab-demo/terraform.tfstate"
+              region         = "${{ vars.AWS_REGION }}"
+              dynamodb_table = "${{ vars.TF_LOCK_TABLE }}"
+            }
+          }
+          EOF
+          terraform init -input=false
+
+      - name: Terraform destroy
+        env:
+          TF_VAR_keycloak_client_secret: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+        run: terraform destroy -auto-approve -input=false

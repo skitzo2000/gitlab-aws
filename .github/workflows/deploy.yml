@@ -1,0 +1,89 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - "ansible/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+# The runner holds no AWS credentials — it assumes the deployer role
+# (created by bootstrap/) via GitHub's OIDC federation, valid only for
+# this repo's main branch.
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: gitlab-demo-terraform
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    env:
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_region: ${{ vars.AWS_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Point Terraform at remote state
+        run: |
+          cat > backend_override.tf <<EOF
+          terraform {
+            backend "s3" {
+              bucket         = "${{ vars.TF_STATE_BUCKET }}"
+              key            = "gitlab-demo/terraform.tfstate"
+              region         = "${{ vars.AWS_REGION }}"
+              dynamodb_table = "${{ vars.TF_LOCK_TABLE }}"
+            }
+          }
+          EOF
+          terraform init -input=false
+
+      # SSH (22) and the k3s API (6443) open only to this runner's IP for
+      # the duration of this deployment's state.
+      - name: Scope admin access to this runner
+        id: ip
+        run: echo "cidr=$(curl -fsS https://checkip.amazonaws.com)/32" >> "$GITHUB_OUTPUT"
+
+      - name: Terraform apply
+        env:
+          TF_VAR_admin_cidr: ${{ steps.ip.outputs.cidr }}
+          TF_VAR_domain: ${{ vars.GITLAB_DOMAIN }}
+          TF_VAR_route53_zone_id: ${{ vars.ROUTE53_ZONE_ID }}
+          TF_VAR_keycloak_issuer_url: ${{ vars.KEYCLOAK_ISSUER_URL }}
+          TF_VAR_keycloak_client_id: ${{ vars.KEYCLOAK_CLIENT_ID }}
+          TF_VAR_keycloak_client_secret: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
+        run: terraform apply -auto-approve -input=false
+
+      - name: Install Ansible
+        run: python3 -m pip install --user ansible-core
+
+      - name: Configure cluster (k3s + GitLab + runner)
+        working-directory: ansible
+        run: ansible-playbook site.yml
+
+      - name: Deployment summary
+        run: |
+          {
+            echo "### GitLab demo platform deployed"
+            echo "- **URL:** $(terraform output -raw gitlab_url)"
+            echo "- **Registry:** $(terraform output -raw registry_host)"
+            echo "- **DNS:** $(terraform output -raw dns_record)"
+            echo "- Root password: \`terraform output -raw gitlab_root_password\` (from the shared state)"
+          } >> "$GITHUB_STEP_SUMMARY"

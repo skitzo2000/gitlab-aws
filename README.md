@@ -67,7 +67,46 @@ supports stop/start; the EIP — and therefore all URLs — survives).
 - Ansible (`pip install ansible-core` — only builtin modules are used, no
   galaxy collections)
 
-## Usage
+## Full pipeline: push to git → lands on AWS
+
+```
+git push (main) ──► GitHub Actions ──► OIDC ──► IAM deployer role ──► terraform apply
+                    (no stored creds)           (minimal, region-scoped)      │
+                                                                    ansible-playbook
+                                                                              │
+                                                              GitLab + runner + Gitea live
+```
+
+The runner holds **no AWS credentials**: the workflow assumes an IAM role via
+GitHub's OIDC federation, trusted only for this repo's `main` branch. The
+role is minimal by construction — `ec2:*` locked to one region, the Terraform
+state bucket + lock table, optionally record-changes on your one Route 53
+zone, and **zero IAM permissions** (the platform creates no IAM resources,
+so the role cannot escalate).
+
+One-time setup (with your own admin credentials):
+
+```bash
+cd bootstrap
+terraform init && terraform apply     # OIDC provider, deployer role, S3 state, lock table
+terraform output github_setup         # gh CLI commands: repo variables + optional secrets
+```
+
+That's it. From then on:
+
+- **`git push` to `main`** (touching `terraform/` or `ansible/`) deploys —
+  apply + playbook, with a run summary showing the URLs.
+- **Actions → destroy → type `destroy`** tears everything down.
+- Terraform state lives in S3 (created by bootstrap), shared between CI and
+  laptops — bootstrap drops a gitignored `backend_override.tf` so local
+  `terraform` commands use the same state. (If you had local state first,
+  migrate once with `terraform init -migrate-state`.)
+- Each deploy scopes SSH/k3s-API access (`admin_cidr`) to that runner's IP.
+- Platform config in CI comes from repo variables (`GITLAB_DOMAIN`,
+  `ROUTE53_ZONE_ID`, `KEYCLOAK_ISSUER_URL`, `KEYCLOAK_CLIENT_ID`) and one
+  secret (`KEYCLOAK_CLIENT_SECRET`) — same knobs as the tfvars walkthrough.
+
+## Manual usage (no CI)
 
 ```bash
 cd terraform
@@ -75,7 +114,7 @@ terraform init
 terraform apply          # ~2 min; generates ../ansible/inventory/
 
 cd ../ansible
-ansible-playbook site.yml   # k3s + GitLab + runner; GitLab boot is the long pole (~8-10 min)
+ansible-playbook site.yml   # k3s + GitLab + runner + Gitea; GitLab boot is the long pole (~8-10 min)
 
 cd ../terraform
 terraform output gitlab_url             # http://gitlab.<eip>.sslip.io
@@ -100,14 +139,31 @@ Tear down:
 terraform destroy
 ```
 
-## Demo pipeline
+## The three-forge demo arc
 
-`examples/spaceballs-the-docker/` is the deck's narrative: a commit triggers a
-pipeline on the hosted runner, which **builds** Spaceballs-the-docker and pushes
-it to the self-hosted registry. Create a project in the demo GitLab and drop
-those three files in — with a domain configured (HTTPS) it works as-is,
-including `docker pull` from your laptop. Only in sslip.io/HTTP mode does dind
-need the `--insecure-registry` flag (see the comment in the `.gitlab-ci.yml`).
+The demo shows competence across containers and all three forges:
+
+1. **GitHub** — this repo *is* the exhibit: push to `main` and the Actions
+   pipeline (OIDC, no stored creds) builds the entire platform on AWS.
+2. **GitLab** — `examples/spaceballs-the-docker/` is the deck's narrative: a
+   commit triggers a pipeline on the hosted runner, which **builds**
+   Spaceballs-the-docker and pushes it to GitLab's own registry. With a
+   domain configured (HTTPS) it works as-is; only in sslip.io/HTTP mode does
+   dind need the `--insecure-registry` flag (see the `.gitlab-ci.yml`).
+3. **Gitea** (deployed alongside, `http://gitea.<host>:3000`, login
+   `gitea_admin`) — closes the loop:
+   - *Mirror the repo*: Gitea → **+ → New Migration → GitLab**, paste the
+     spaceballs repo URL from the demo GitLab — live cross-forge mirroring.
+   - *Pull the image through Gitea's registry*:
+     ```bash
+     docker pull  <registry_host>/root/spaceballs-the-docker:latest   # from GitLab
+     docker login gitea.<host>:3000 -u gitea_admin
+     docker tag   <registry_host>/root/spaceballs-the-docker:latest gitea.<host>:3000/gitea_admin/spaceballs-the-docker:latest
+     docker push  gitea.<host>:3000/gitea_admin/spaceballs-the-docker:latest
+     docker run   gitea.<host>:3000/gitea_admin/spaceballs-the-docker:latest   # "They've gone to plaid."
+     ```
+     (Gitea speaks HTTP on :3000 — add it to your Docker daemon's
+     `insecure-registries` for the pull/push from a laptop.)
 
 ## DNS / pointing a domain at it
 
@@ -181,9 +237,10 @@ it's written as a step-by-step walkthrough. Copy it to `terraform.tfvars`
 | **1** | `region`, `admin_cidr` | admin plane (SSH, k3s API) locked to your IP |
 | **2** | `domain` (+ `route53_zone_id`) | real URLs + automatic HTTPS via Let's Encrypt |
 | **3** | `keycloak_issuer_url`, `_client_id`, `_client_secret` | SSO against the amnesia-labs Keycloak (needs step 2) |
-| **4** | `use_spot`, instance types/counts, volumes | sizing & cost |
-| **5** | `gitlab_image`, `runner_image` | version bumps |
-| **6** | `vpc_cidr`, `subnet_cidr`, `cp_private_ip` | network layout (rarely) |
+| **4** | `gitea_enabled` (default on), `gitea_image` | the third forge: Gitea web + registry on :3000 |
+| **5** | `use_spot`, instance types/counts, volumes | sizing & cost |
+| **6** | `gitlab_image`, `runner_image` | version bumps |
+| **7** | `vpc_cidr`, `subnet_cidr`, `cp_private_ip` | network layout (rarely) |
 
 `terraform/variables.tf` is the full reference — every variable carries a
 description, grouped in the same section order. **Incoherent combinations
@@ -218,7 +275,8 @@ depends on) — checks live on the generated group_vars file in
 | Cert not issued / readiness wait loops in HTTPS mode | Does the DNS record exist and point at the EIP? `kubectl -n gitlab logs deploy/gitlab \| grep -i letsencrypt`; LE rate limits are per-domain (5 duplicate certs/week) |
 | SSO button missing or login fails | Issuer URL must match Keycloak's realm URL exactly (discovery is on); check the client secret and that the redirect URI is registered; `kubectl -n gitlab logs deploy/gitlab \| grep -i omniauth` |
 | Ansible can't connect | Did `terraform apply` finish? Worker IPs change on stop/start — re-apply to refresh the inventory |
-| Pipeline can't push image | Did you replace `REGISTRY_HOST_PLACEHOLDER` in `.gitlab-ci.yml`? |
+| Gitea not up / login fails | `kubectl -n gitea logs deploy/gitea`; admin user is `gitea_admin` (`admin`/`root` are reserved names) |
+| CI deploy fails at AssumeRole | Bootstrap run? Repo variables set (`terraform output github_setup`)? Workflow must run on `main` — the role trusts only that branch |
 
 ## What's next (per the deck)
 

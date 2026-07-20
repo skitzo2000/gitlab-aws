@@ -14,9 +14,10 @@
 #   2. Access            — who can reach SSH / the k3s API
 #   3. DNS & HTTPS       — real domain, Route 53, Let's Encrypt
 #   4. SSO               — the external amnesia-labs Keycloak
-#   5. Sizing & cost     — instance types, spot, volumes
-#   6. Software versions — GitLab / runner images
-#   7. Network           — VPC layout (rarely needs touching)
+#   5. Gitea             — the demo's third forge
+#   6. Sizing & cost     — instance types, spot, volumes
+#   7. Software versions — GitLab / runner images
+#   8. Network           — VPC layout (rarely needs touching)
 
 # --- 1. Basics ---------------------------------------------------------------
 
@@ -100,7 +101,25 @@ variable "keycloak_label" {
   default     = "Amnesia Labs SSO"
 }
 
-# --- 5. Sizing & cost --------------------------------------------------------
+# --- 5. Gitea (the demo's third forge) ---------------------------------------
+# A small Gitea on the cluster closes the demo arc: GitHub runs the pipeline
+# that builds the platform, GitLab builds Spaceballs-the-docker into its
+# registry, Gitea mirrors the repo and pulls the image at the end.
+# Web + container registry on port 3000 (HTTP).
+
+variable "gitea_enabled" {
+  description = "Deploy Gitea (web + container registry at gitea.<host>:3000)."
+  type        = bool
+  default     = true
+}
+
+variable "gitea_image" {
+  description = "Gitea container image."
+  type        = string
+  default     = "gitea/gitea:1.24"
+}
+
+# --- 6. Sizing & cost --------------------------------------------------------
 
 variable "use_spot" {
   description = "Run all nodes as persistent spot instances (interruption behavior = stop; ~70% off, also lets you stop the cluster between demos). false = on-demand."
@@ -143,7 +162,7 @@ variable "worker_volume_gb" {
   default     = 40
 }
 
-# --- 6. Software versions ----------------------------------------------------
+# --- 7. Software versions ----------------------------------------------------
 
 variable "gitlab_image" {
   description = "GitLab omnibus (CE) container image."
@@ -157,7 +176,7 @@ variable "runner_image" {
   default     = "gitlab/gitlab-runner:alpine-v18.5.0"
 }
 
-# --- 7. Network (rarely needs touching) --------------------------------------
+# --- 8. Network (rarely needs touching) --------------------------------------
 # The defaults deliberately avoid 10.42.0.0/16 and 10.43.0.0/16, which k3s
 # uses internally for pods and services.
 

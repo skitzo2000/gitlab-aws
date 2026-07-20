@@ -11,6 +11,10 @@ locals {
   gitlab_https      = var.domain != ""
   gitlab_scheme     = local.gitlab_https ? "https" : "http"
   letsencrypt_email = var.letsencrypt_email != "" ? var.letsencrypt_email : (var.domain != "" ? "admin@${var.domain}" : "")
+
+  # Gitea rides the same EIP on port 3000 (HTTP — no ACME port conflict
+  # with GitLab, and it's the demo's supporting act).
+  gitea_host = var.domain != "" ? "gitea.${var.domain}" : "gitea.${replace(aws_eip.cp.public_ip, ".", "-")}.sslip.io"
 }
 
 # Official Debian cloud image — minimal surface area vs. Ubuntu (no snapd,
@@ -56,6 +60,11 @@ resource "random_password" "gitlab_root" {
 
 resource "random_password" "k3s_token" {
   length  = 32
+  special = false
+}
+
+resource "random_password" "gitea_admin" {
+  length  = 20
   special = false
 }
 
