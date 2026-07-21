@@ -71,7 +71,21 @@ resource "aws_iam_role" "deployer" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:ref:refs/heads/${var.branch}"
+        }
+        # GitHub issues two shapes of subject claim. The classic one is
+        # literally repo:OWNER/REPO:ref:..., but repositories on immutable
+        # OIDC identifiers get the numeric owner and repo IDs appended —
+        # repo:OWNER@600824/REPO@1306106194:ref:... — so that renaming an
+        # org or repo can't silently hand trust to whoever claims the freed
+        # name. A StringEquals on the classic form simply never matches
+        # those, and the failure surfaces only as "Not authorized to perform
+        # sts:AssumeRoleWithWebIdentity" with a trust policy that looks
+        # perfectly correct. Accept either, still pinned to one branch.
+        StringLike = {
+          "token.actions.githubusercontent.com:sub" = [
+            "repo:${var.github_repo}:ref:refs/heads/${var.branch}",
+            "repo:${split("/", var.github_repo)[0]}@*/${split("/", var.github_repo)[1]}@*:ref:refs/heads/${var.branch}",
+          ]
         }
       }
     }]
