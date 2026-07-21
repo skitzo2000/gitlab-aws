@@ -77,6 +77,14 @@
 # Empty (the default) = no persistence, issue fresh on every rebuild.
 # cert_bucket = ""
 
+# Fallback cert source when the S3 store is empty AND you've run out of Let's
+# Encrypt's five-per-week duplicate certificates for the host: an ACM
+# exportable public cert (no weekly limit). Provision it ONCE with
+# scripts/acm-provision.sh <host> — that request costs $7/FQDN and again on
+# ACM's ~198-day renewal; exporting it on each deploy is free. After the first
+# use it's cached in S3, so ACM is exported at most once. Empty/false = off.
+# acm_fallback = false
+
 # -----------------------------------------------------------------------------
 # STEP 3 — SSO via an external Keycloak (requires STEP 2)
 # -----------------------------------------------------------------------------

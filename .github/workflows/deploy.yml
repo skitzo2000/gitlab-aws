@@ -30,6 +30,14 @@ on:
           the public address, DNS record and certificate are unaffected.
         type: boolean
         default: false
+      cert_only:
+        description: >-
+          Run only the certificate restore/backup against S3, skipping the
+          rest of the playbook. Proves the restore path works before you
+          rely on it during a rebuild — it writes the Secret and nothing
+          else, so a running cluster is unaffected.
+        type: boolean
+        default: false
 
 # The runner holds no AWS credentials — it assumes the deployer role
 # (created by bootstrap/) via GitHub's OIDC federation, valid only for
@@ -92,6 +100,7 @@ jobs:
           TF_VAR_domain: ${{ vars.GITLAB_DOMAIN }}
           TF_VAR_letsencrypt_email: ${{ vars.LETSENCRYPT_EMAIL }}
           TF_VAR_cert_bucket: ${{ vars.TF_STATE_BUCKET }}
+          TF_VAR_acm_fallback: ${{ vars.ACM_FALLBACK || 'false' }}
           TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_route53_zone_id: ${{ vars.ROUTE53_ZONE_ID }}
@@ -113,9 +122,15 @@ jobs:
       - name: Install Ansible
         run: python3 -m pip install --user ansible-core
 
+      # cert_only exercises the S3 restore/backup path against the real
+      # bucket and the real controller, without touching the cluster: the
+      # restore just writes a Secret manifest, and the seed-cert
+      # initContainer reads it only when a pod is recreated. Worth running
+      # before any rebuild, because a rebuild whose restore fails has no
+      # fallback once the weekly Let's Encrypt budget is spent.
       - name: Configure cluster (k3s + GitLab + runner)
         working-directory: ansible
-        run: ansible-playbook site.yml
+        run: ansible-playbook site.yml ${{ inputs.cert_only && '--tags cert' || '' }}
 
       - name: Deployment summary
         run: |
