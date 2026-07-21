@@ -60,6 +60,11 @@ spec:
 {% endif %}
                 gitlab_rails['initial_root_password'] = '{{ gitlab_root_password }}'
                 gitlab_rails['gitlab_shell_ssh_port'] = 2222
+                # /-/readiness and /-/liveness are IP-whitelisted (404 for
+                # everyone else). Kubelet probes arrive from the node IP and
+                # the playbook's readiness wait from a svclb-DNATed VPC/pod
+                # address — all within 10/8. Without this, probes 404 forever.
+                gitlab_rails['monitoring_whitelist'] = ['127.0.0.0/8', '10.0.0.0/8']
 {% if keycloak_enabled %}
                 # SSO against the external amnesia-labs Keycloak (OIDC).
                 # Password login stays enabled alongside SSO.
@@ -169,6 +174,12 @@ metadata:
   namespace: gitlab
 spec:
   type: LoadBalancer
+  # Route to the pod even before its startup probe passes: Let's Encrypt's
+  # HTTP-01 challenge must reach nginx THROUGH this service to issue the
+  # cert, but the HTTPS startup probe can't pass until the cert exists —
+  # without this line, first boot in HTTPS mode deadlocks (refused on 80/443
+  # until the probe gives up). Mid-boot requests just get nginx 502s.
+  publishNotReadyAddresses: true
   selector:
     app: gitlab
   ports:

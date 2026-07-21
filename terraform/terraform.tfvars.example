@@ -1,10 +1,10 @@
 # =============================================================================
-# GitLab Demo Platform — configuration walkthrough
+# GitLab Demo Platform — complete configuration reference
 # =============================================================================
-# Copy this file to terraform.tfvars (gitignored) and work through the steps
-# top to bottom. Everything is optional: an EMPTY terraform.tfvars gives you
-# a working HTTP demo at http://gitlab.<eip>.sslip.io — each step below
-# unlocks one capability on top of that.
+# Copy this file to terraform.tfvars (gitignored) and uncomment what you need.
+# EVERY variable the platform has is listed below, and every commented value
+# IS the default — uncommenting a line unchanged is always a no-op. An empty
+# terraform.tfvars gives a working HTTP demo at http://gitlab.<eip>.sslip.io.
 #
 #   STEP 1  region + lock down admin access        (do this for every deploy)
 #   STEP 2  real domain -> automatic HTTPS         (needed for STEP 3)
@@ -13,7 +13,6 @@
 #   STEP 5  software versions
 #   STEP 6  network layout                         (rarely)
 #
-# Full reference with all defaults: variables.tf
 # Misconfigurations (e.g. SSO without a domain) fail at `terraform plan`
 # with a message pointing at the step to fix.
 #
@@ -23,65 +22,104 @@
 # -----------------------------------------------------------------------------
 # STEP 1 — Region + admin access
 # -----------------------------------------------------------------------------
-# admin_cidr gates SSH (22) and the k3s API (6443). Default is 0.0.0.0/0;
-# set it to your own IP. (GitLab's public ports stay public regardless.)
 
-# region     = "us-east-1"
-# admin_cidr = "203.0.113.7/32"
+# AWS region to deploy into. The cluster lands in the region's first
+# availability zone (not configurable via tfvars).
+# region = "us-east-1"
 
-# Prefix for all AWS resource names (and the SSH key file):
+# CIDR allowed to reach the ADMIN plane: SSH (22) and the k3s API (6443).
+# Default is wide open — set it to your own IP (e.g. "1.2.3.4/32") for
+# anything beyond a throwaway demo. GitLab's public ports (80/443/5050/2222)
+# stay open to the world regardless; this only gates the admin plane.
+# admin_cidr = "0.0.0.0/0"
+
+# Name prefix for every AWS resource, the SSH key file
+# (terraform/<project>-key.pem), and the state key in S3.
 # project = "gitlab-demo"
 
 # -----------------------------------------------------------------------------
 # STEP 2 — Real domain -> automatic HTTPS
 # -----------------------------------------------------------------------------
-# Setting `domain` switches every URL to gitlab.<domain> and turns on HTTPS:
-# GitLab's built-in Let's Encrypt issues the cert against the DNS record and
-# auto-renews it. The same cert covers the container registry, so docker
-# pushes/pulls need no insecure-registry workarounds.
+# Empty domain (the default) = HTTP-only demo at gitlab.<eip>.sslip.io, zero
+# DNS setup. Setting a domain makes GitLab https://gitlab.<domain> — note the
+# gitlab. prefix is added FOR you (domain = "example.com" -> URL
+# gitlab.example.com) — and turns on HTTPS: GitLab's built-in Let's Encrypt
+# issues the cert against the DNS record and auto-renews it. The same cert
+# covers the container registry, so docker pushes need no insecure-registry
+# workarounds.
 #
-#   a) Zone hosted in Route 53: set both values — Terraform creates and owns
-#      the A record, nothing manual.
-#   b) DNS hosted elsewhere: set only `domain`, then create the A record
+#   a) Zone hosted in Route 53: set domain + route53_zone_id — Terraform
+#      creates and owns the A record, nothing manual.
+#   b) Zone at Cloudflare: set domain + cloudflare_zone_id + an API token
+#      with Zone:DNS:Edit — Terraform owns the record, created DNS-only
+#      (grey cloud; proxying would break Let's Encrypt and ports 5050/2222).
+#      Zone ID: dashboard -> zone Overview. Token: profile -> API Tokens.
+#   c) DNS hosted elsewhere: set only `domain`, then create the A record
 #      printed by `terraform output dns_record` BEFORE running the playbook
 #      (Let's Encrypt validates against it).
+# route53_zone_id and cloudflare_zone_id are mutually exclusive.
 
-# domain          = "demo.example.com"
-# route53_zone_id = "Z0123456789ABCDEFGHIJ"
+# domain               = ""
+# route53_zone_id      = ""
+# cloudflare_zone_id   = ""
+# cloudflare_api_token = ""
 
-# Let's Encrypt contact. Default: admin@<domain>.
-# letsencrypt_email = "you@example.com"
+# Contact email for Let's Encrypt registration.
+# Empty = admin@<domain> is used.
+# letsencrypt_email = ""
 
 # -----------------------------------------------------------------------------
 # STEP 3 — SSO via the amnesia-labs Keycloak (requires STEP 2)
 # -----------------------------------------------------------------------------
 # GitLab federates to the existing Keycloak over OIDC; nothing is deployed.
-# One-time setup on the Keycloak side:
+# Empty issuer URL (the default) disables SSO entirely. One-time setup on
+# the Keycloak side:
 #   1. In your realm, create a CONFIDENTIAL client (standard flow),
 #      client ID "gitlab" (or set keycloak_client_id to match).
 #   2. Register the redirect URI from:  terraform output keycloak_redirect_uri
 #   3. Copy the client secret here.
-# The login page then shows an "Amnesia Labs SSO" button next to password
-# login. Users are auto-created on first SSO login.
+# The login page then shows an SSO button next to password login. Users are
+# auto-created on first SSO login (preferred_username -> GitLab username).
 
-# keycloak_issuer_url    = "https://keycloak.amnesia-labs.com/realms/<realm>"
+# keycloak_issuer_url    = ""
 # keycloak_client_id     = "gitlab"
-# keycloak_client_secret = "<from Keycloak>"
-# keycloak_label         = "Amnesia Labs SSO"
+# keycloak_client_secret = ""
+
+# Text on the SSO button on GitLab's login page.
+# keycloak_label = "Amnesia Labs SSO"
 
 # -----------------------------------------------------------------------------
 # STEP 4 — Sizing & cost
 # -----------------------------------------------------------------------------
-# Defaults: 1x t3a.small control plane (tainted, workload-free) +
-# 2x t3a.large workers, all AMD persistent spot — ~$0.09/hr running,
-# ~$0.02/hr stopped. Spot reclaims STOP (not terminate) the instances.
+# Defaults: 1x t3a.small control plane (tainted NoSchedule, runs only k3s) +
+# 2x m6a.large workers, AMD on-demand — ~$0.21/hr running, ~$0.02/hr
+# stopped. Stop the cluster between demos; the EIP (and all URLs) survives.
 
-# use_spot             = true
+# Default is ON-DEMAND: launches always succeed, and stopping/starting the
+# cluster between demos is fully under your control. Set true for persistent
+# spot (~70% off compute) if you accept capacity stalls at launch and AWS
+# stopping instances under you (they restart on their own, but mid-demo...).
+# use_spot = false
+
+# Instance types. Workers are non-burstable (m6a) on purpose: fresh t*
+# instances start with zero CPU credits and throttle to 30%/vCPU right when
+# the first GitLab boot needs CPU most (20+ min boots). t3a.large workers
+# save ~$0.02/hr if slow rebuild boots are acceptable.
+# (Spot mode only: capacity is per-type-per-AZ — if an apply hangs at
+# "Still creating...", that type's pool is empty; switch to a sibling,
+# t3a.* AMD <-> t3.* Intel, and re-apply.)
 # cp_instance_type     = "t3a.small"
-# worker_instance_type = "t3a.large"
-# worker_count         = 2
-# cp_volume_gb         = 20
-# worker_volume_gb     = 40
+# worker_instance_type = "m6a.large"
+
+# Number of k3s workers. Minimum 1 (the control plane is tainted and runs no
+# workloads). With the default 2, GitLab's 4Gi request fills worker-1 and the
+# runner + CI job pods land on worker-2.
+# worker_count = 2
+
+# Root EBS volumes (GiB, gp3). Worker volumes hold GitLab data, registry
+# blobs, and container images.
+# cp_volume_gb     = 20
+# worker_volume_gb = 40
 
 # -----------------------------------------------------------------------------
 # STEP 5 — Software versions
@@ -95,8 +133,14 @@
 # STEP 6 — Network layout (rarely needed)
 # -----------------------------------------------------------------------------
 # Defaults avoid k3s' internal ranges (10.42.0.0/16 pods, 10.43.0.0/16
-# services). cp_private_ip must sit inside subnet_cidr.
+# services) — keep clear of those if you change anything here.
+# The public subnet holds the cp (EIP, svclb ingress, NAT for the workers);
+# the private subnet holds the workers (no public IPs, egress via the cp).
 
-# vpc_cidr      = "10.60.0.0/16"
-# subnet_cidr   = "10.60.1.0/24"
+# vpc_cidr            = "10.60.0.0/16"
+# subnet_cidr         = "10.60.1.0/24"
+# private_subnet_cidr = "10.60.2.0/24"
+
+# Static private IP for the control plane, so workers can join without
+# boot-order games. Must sit inside subnet_cidr.
 # cp_private_ip = "10.60.1.10"

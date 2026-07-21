@@ -43,7 +43,7 @@ resource "aws_security_group" "cluster" {
   }
 
   ingress {
-    description = "GitLab HTTPS (and Let's Encrypt HTTP-01 uses port 80 above)"
+    description = "GitLab HTTPS (Lets Encrypt HTTP-01 uses port 80 above)"
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"

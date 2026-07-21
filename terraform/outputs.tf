@@ -34,6 +34,7 @@ output "dns_record" {
   value = (
     var.domain == "" ? "none needed — using sslip.io (${local.gitlab_host})" :
     var.route53_zone_id != "" ? "managed by Terraform in Route 53: ${local.gitlab_host} A ${aws_eip.cp.public_ip}" :
+    var.cloudflare_zone_id != "" ? "managed by Terraform in Cloudflare (DNS-only): ${local.gitlab_host} A ${aws_eip.cp.public_ip}" :
     "create at your DNS host: ${local.gitlab_host}  A  ${aws_eip.cp.public_ip}  (TTL 300)"
   )
 }
@@ -43,9 +44,9 @@ output "cp_public_ip" {
   value       = aws_eip.cp.public_ip
 }
 
-output "worker_public_ips" {
-  description = "Worker public IPs (change on stop/start; nothing external points at them)."
-  value       = aws_instance.worker[*].public_ip
+output "worker_private_ips" {
+  description = "Workers are private-only; SSH goes through the cp (the generated inventory's ProxyCommand does this automatically)."
+  value       = aws_instance.worker[*].private_ip
 }
 
 output "ssh_control_plane" {

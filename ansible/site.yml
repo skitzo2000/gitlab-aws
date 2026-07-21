@@ -11,10 +11,11 @@
       ansible.builtin.wait_for_connection:
         timeout: 300
 
-- name: Control plane — k3s server (tainted) + GitLab manifest
+- name: Control plane — NAT for workers, k3s server (tainted), GitLab manifest
   hosts: control_plane
   become: true
   roles:
+    - nat_gateway # before anything the workers need egress for
     - k3s_server
     - gitlab
 

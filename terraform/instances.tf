@@ -89,6 +89,20 @@ resource "aws_instance" "cp" {
   vpc_security_group_ids = [aws_security_group.cluster.id]
   key_name               = aws_key_pair.this.key_name
 
+  # The cp is also the workers' NAT (private route table points here), which
+  # means forwarding packets that aren't addressed to it.
+  source_dest_check = false
+
+  # Only burstable (t*) types have a credit concept; other families reject
+  # the block. Standard credits suffice for the cp's k3s-only load — workers
+  # default to a non-burstable type instead (see variables.tf).
+  dynamic "credit_specification" {
+    for_each = startswith(var.cp_instance_type, "t") ? [1] : []
+    content {
+      cpu_credits = "standard"
+    }
+  }
+
   dynamic "instance_market_options" {
     for_each = var.use_spot ? [1] : []
     content {
@@ -100,9 +114,6 @@ resource "aws_instance" "cp" {
     }
   }
 
-  credit_specification {
-    cpu_credits = "standard"
-  }
 
   metadata_options {
     http_tokens = "required"
@@ -121,14 +132,25 @@ resource "aws_instance" "cp" {
 
 # --- Workers ---------------------------------------------------------------
 
+# Workers are fully private: no public IPs, egress NATed through the cp,
+# SSH via ProxyJump through the cp (the generated inventory handles it).
+# Side effect: their addresses are stable, so stop/starts and spot reclaims
+# never invalidate the inventory.
 resource "aws_instance" "worker" {
   count = var.worker_count
 
   ami                    = data.aws_ami.debian.id
   instance_type          = var.worker_instance_type
-  subnet_id              = aws_subnet.public.id
+  subnet_id              = aws_subnet.private.id
   vpc_security_group_ids = [aws_security_group.cluster.id]
   key_name               = aws_key_pair.this.key_name
+
+  dynamic "credit_specification" {
+    for_each = startswith(var.worker_instance_type, "t") ? [1] : []
+    content {
+      cpu_credits = "standard"
+    }
+  }
 
   dynamic "instance_market_options" {
     for_each = var.use_spot ? [1] : []
@@ -141,9 +163,6 @@ resource "aws_instance" "worker" {
     }
   }
 
-  credit_specification {
-    cpu_credits = "standard"
-  }
 
   metadata_options {
     http_tokens = "required"

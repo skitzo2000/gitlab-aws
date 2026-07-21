@@ -59,9 +59,22 @@ variable "domain" {
 }
 
 variable "route53_zone_id" {
-  description = "Route 53 hosted zone ID for var.domain. If set, Terraform creates/owns the A record to the EIP. Empty = create the record at your DNS host yourself (see the dns_record output) BEFORE running the playbook."
+  description = "Route 53 hosted zone ID for var.domain. If set, Terraform creates/owns the A record to the EIP. Empty = Cloudflare (below) or create the record at your DNS host yourself (see the dns_record output) BEFORE running the playbook."
   type        = string
   default     = ""
+}
+
+variable "cloudflare_zone_id" {
+  description = "Cloudflare zone ID for var.domain (dashboard -> zone Overview). If set, Terraform creates/owns the A record to the EIP — always DNS-only (grey cloud): proxying breaks Let's Encrypt HTTP-01 and the non-HTTP ports (registry 5050, git-ssh 2222). Mutually exclusive with route53_zone_id."
+  type        = string
+  default     = ""
+}
+
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token with Zone:DNS:Edit on that zone (dash.cloudflare.com/profile/api-tokens). Required when cloudflare_zone_id is set."
+  type        = string
+  default     = ""
+  sensitive   = true
 }
 
 variable "letsencrypt_email" {
@@ -103,9 +116,9 @@ variable "keycloak_label" {
 # --- 5. Sizing & cost --------------------------------------------------------
 
 variable "use_spot" {
-  description = "Run all nodes as persistent spot instances (interruption behavior = stop; ~70% off, also lets you stop the cluster between demos). false = on-demand."
+  description = "false (default) = on-demand: launches always succeed, stop/start is fully under your control, no reclaim surprises. true = persistent spot (~70% off compute, but launches can stall on capacity and AWS can stop instances under you)."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "cp_instance_type" {
@@ -115,9 +128,9 @@ variable "cp_instance_type" {
 }
 
 variable "worker_instance_type" {
-  description = "Worker instance type. One worker hosts GitLab omnibus (~5 GiB RAM), the other the runner + CI job pods."
+  description = "Worker instance type. One worker hosts GitLab omnibus (~5 GiB RAM), the other the runner + CI job pods. Non-burstable (m6a) by design: fresh burstable (t*) instances start with zero CPU credits and throttle to 30%/vCPU exactly when the first GitLab boot needs CPU most (20+ min boots). t* workers get standard credits — expect slow first boots."
   type        = string
-  default     = "t3a.large"
+  default     = "m6a.large"
 }
 
 variable "worker_count" {
@@ -168,9 +181,15 @@ variable "vpc_cidr" {
 }
 
 variable "subnet_cidr" {
-  description = "Public subnet CIDR (single subnet, single AZ — no NAT, by design)."
+  description = "Public subnet CIDR (control plane + EIP live here)."
   type        = string
   default     = "10.60.1.0/24"
+}
+
+variable "private_subnet_cidr" {
+  description = "Private subnet CIDR (workers live here, no public IPs; egress via the cp acting as NAT)."
+  type        = string
+  default     = "10.60.2.0/24"
 }
 
 variable "cp_private_ip" {

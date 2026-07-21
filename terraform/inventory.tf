@@ -6,12 +6,18 @@ resource "local_file" "ansible_inventory" {
   filename        = "${path.module}/../ansible/inventory/hosts.ini"
   file_permission = "0644"
 
+  # Workers are private: addressed by (stable) private IP, reached by
+  # tunneling through the cp. ProxyCommand rather than ProxyJump so the jump
+  # hop gets the same key/options without touching ~/.ssh/config.
   content = <<-EOT
     [control_plane]
     cp ansible_host=${aws_eip.cp.public_ip}
 
     [workers]
-    ${join("\n", [for i, w in aws_instance.worker : "worker-${i + 1} ansible_host=${w.public_ip}"])}
+    ${join("\n", [for i, w in aws_instance.worker : "worker-${i + 1} ansible_host=${w.private_ip}"])}
+
+    [workers:vars]
+    ansible_ssh_common_args=-o ProxyCommand="ssh -W %h:%p -i ${abspath(local_sensitive_file.ssh_key.filename)} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@${aws_eip.cp.public_ip}"
   EOT
 
   depends_on = [aws_eip_association.cp]
@@ -42,6 +48,7 @@ resource "local_sensitive_file" "ansible_group_vars" {
     k3s_token     = random_password.k3s_token.result
     cp_public_ip  = aws_eip.cp.public_ip
     cp_private_ip = var.cp_private_ip
+    vpc_cidr      = var.vpc_cidr # masquerade scope for the nat_gateway role
   })
 
   # Config coherence checks — every value funnels through this file on its
@@ -51,6 +58,21 @@ resource "local_sensitive_file" "ansible_group_vars" {
     precondition {
       condition     = var.route53_zone_id == "" || var.domain != ""
       error_message = "route53_zone_id is set but domain is empty — set domain too (terraform.tfvars.example STEP 2)."
+    }
+
+    precondition {
+      condition     = var.cloudflare_zone_id == "" || var.domain != ""
+      error_message = "cloudflare_zone_id is set but domain is empty — set domain too (terraform.tfvars.example STEP 2)."
+    }
+
+    precondition {
+      condition     = !(var.route53_zone_id != "" && var.cloudflare_zone_id != "")
+      error_message = "route53_zone_id and cloudflare_zone_id are both set — exactly one DNS host can own the record (terraform.tfvars.example STEP 2)."
+    }
+
+    precondition {
+      condition     = var.cloudflare_zone_id == "" || var.cloudflare_api_token != ""
+      error_message = "cloudflare_zone_id is set but cloudflare_api_token is empty — create a token with Zone:DNS:Edit and set it (terraform.tfvars.example STEP 2)."
     }
 
     precondition {

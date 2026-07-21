@@ -7,10 +7,6 @@ output "state_bucket" {
   value = aws_s3_bucket.state.bucket
 }
 
-output "lock_table" {
-  value = aws_dynamodb_table.lock.name
-}
-
 output "github_setup" {
   description = "Run these once (gh CLI, from the repo root) to wire the repository to AWS."
   value       = <<-EOT
@@ -18,7 +14,6 @@ output "github_setup" {
     gh variable set AWS_ROLE_ARN    --body "${aws_iam_role.deployer.arn}"
     gh variable set AWS_REGION      --body "${var.region}"
     gh variable set TF_STATE_BUCKET --body "${aws_s3_bucket.state.bucket}"
-    gh variable set TF_LOCK_TABLE   --body "${aws_dynamodb_table.lock.name}"
 
     # Optional — real domain + HTTPS (walkthrough STEP 2):
     # gh variable set GITLAB_DOMAIN    --body "demo.example.com"
