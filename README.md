@@ -50,7 +50,7 @@ Design decisions:
 | Runner config **pre-provisioned** | Ansible creates an instance runner through the GitLab API and templates a complete `config.toml` (kubernetes executor, privileged for dind) into a Secret — the runner pod just runs, no `register` step |
 | **Debian 13 minimal** AMI | Widest-surface-area OS avoided: official Debian cloud image, no snapd, minimal package set. SSH user is `admin` |
 | **HTTPS via omnibus Let's Encrypt** | When a domain is set, GitLab obtains and auto-renews its own cert (HTTP-01 against the DNS record Terraform manages) — no cert-manager, no manual certs. Same cert covers the registry, so dind needs no insecure-registry flag |
-| **SSO via external Keycloak** | The amnesia-labs Keycloak is the OIDC provider — nothing to deploy here, just three variables. Password login stays enabled alongside SSO |
+| **SSO via external Keycloak** | Any existing Keycloak (or other OIDC IdP) is the provider — nothing to deploy here, just three variables. Password login stays enabled alongside SSO |
 
 ## Cost (us-east-1, approximate)
 
@@ -260,9 +260,9 @@ port 80, which stays open for that + the HTTPS redirect) and auto-renews it.
 mode) the stack stays HTTP, since Let's Encrypt won't issue for sslip
 hostnames.
 
-## SSO (amnesia-labs Keycloak)
+## SSO (external Keycloak)
 
-GitLab federates to the existing amnesia-labs Keycloak over OIDC — the
+GitLab federates to your existing Keycloak over OIDC — the
 platform deploys nothing Keycloak-related, it just points at it:
 
 1. In Keycloak, create a **confidential client** (standard/authorization-code
@@ -270,12 +270,12 @@ platform deploys nothing Keycloak-related, it just points at it:
    `terraform output keycloak_redirect_uri`.
 2. Set in `terraform.tfvars`:
    ```hcl
-   keycloak_issuer_url    = "https://keycloak.amnesia-labs.com/realms/<realm>"
+   keycloak_issuer_url    = "https://keycloak.example.com/realms/<realm>"
    keycloak_client_id     = "gitlab"
    keycloak_client_secret = "<from Keycloak>"
    ```
 3. `terraform apply` + re-run the playbook. The login page grows an
-   "Amnesia Labs SSO" button (label configurable via `keycloak_label`).
+   "Keycloak SSO" button (label configurable via `keycloak_label`).
 
 Users are auto-created on first SSO login (`preferred_username` becomes the
 GitLab username) and are not blocked pending admin approval — demo-friendly
@@ -306,7 +306,7 @@ it's written as a step-by-step walkthrough. Copy it to `terraform.tfvars`
 | *(none)* | nothing — empty tfvars works | HTTP demo at `http://gitlab.<eip>.sslip.io` |
 | **1** | `region`, `admin_cidr` | admin plane (SSH, k3s API) locked to your IP |
 | **2** | `domain` (+ `route53_zone_id`) | real URLs + automatic HTTPS via Let's Encrypt |
-| **3** | `keycloak_issuer_url`, `_client_id`, `_client_secret` | SSO against the amnesia-labs Keycloak (needs step 2) |
+| **3** | `keycloak_issuer_url`, `_client_id`, `_client_secret` | SSO against an external Keycloak (needs step 2) |
 | **4** | `use_spot`, instance types/counts, volumes | sizing & cost |
 | **5** | `gitlab_image`, `runner_image` | version bumps |
 | **6** | `vpc_cidr`, `subnet_cidr`, `cp_private_ip` | network layout (rarely) |

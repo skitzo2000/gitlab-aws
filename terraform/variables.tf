@@ -13,7 +13,7 @@
 #   1. Basics            — project name, region
 #   2. Access            — who can reach SSH / the k3s API
 #   3. DNS & HTTPS       — real domain, Route 53, Let's Encrypt
-#   4. SSO               — the external amnesia-labs Keycloak
+#   4. SSO               — the external Keycloak
 #   5. Sizing & cost     — instance types, spot, volumes
 #   6. Software versions — GitLab / runner images
 #   7. Network           — VPC layout (rarely needs touching)
@@ -108,13 +108,13 @@ variable "letsencrypt_email" {
   default     = ""
 }
 
-# --- 4. SSO (external amnesia-labs Keycloak) ---------------------------------
+# --- 4. SSO (external Keycloak) ---------------------------------
 # Nothing Keycloak-related is deployed here; GitLab federates to the
 # existing instance over OIDC. Requires the DNS/HTTPS setup above, since
 # Keycloak redirects the browser back to GitLab's public URL.
 
 variable "keycloak_issuer_url" {
-  description = "OIDC issuer URL of the Keycloak realm, e.g. https://keycloak.amnesia-labs.com/realms/<realm>. Empty disables SSO entirely."
+  description = "OIDC issuer URL of the Keycloak realm, e.g. https://keycloak.example.com/realms/<realm>. Empty disables SSO entirely."
   type        = string
   default     = ""
 }
@@ -135,7 +135,7 @@ variable "keycloak_client_secret" {
 variable "keycloak_label" {
   description = "Text on the SSO button on GitLab's login page."
   type        = string
-  default     = "Amnesia Labs SSO"
+  default     = "Keycloak SSO"
 }
 
 # --- 5. Sizing & cost --------------------------------------------------------

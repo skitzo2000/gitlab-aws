@@ -8,7 +8,7 @@
 #
 #   STEP 1  region + lock down admin access        (do this for every deploy)
 #   STEP 2  real domain -> automatic HTTPS         (needed for STEP 3)
-#   STEP 3  SSO via the amnesia-labs Keycloak
+#   STEP 3  SSO via an external Keycloak
 #   STEP 4  sizing & cost
 #   STEP 5  software versions
 #   STEP 6  network layout                         (rarely)
@@ -78,7 +78,7 @@
 # cert_bucket = ""
 
 # -----------------------------------------------------------------------------
-# STEP 3 — SSO via the amnesia-labs Keycloak (requires STEP 2)
+# STEP 3 — SSO via an external Keycloak (requires STEP 2)
 # -----------------------------------------------------------------------------
 # GitLab federates to the existing Keycloak over OIDC; nothing is deployed.
 # Empty issuer URL (the default) disables SSO entirely. One-time setup on
@@ -95,7 +95,7 @@
 # keycloak_client_secret = ""
 
 # Text on the SSO button on GitLab's login page.
-# keycloak_label = "Amnesia Labs SSO"
+# keycloak_label = "Keycloak SSO"
 
 # -----------------------------------------------------------------------------
 # STEP 4 — Sizing & cost

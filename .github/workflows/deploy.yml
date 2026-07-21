@@ -41,14 +41,14 @@ jobs:
       TF_IN_AUTOMATION: "true"
       TF_VAR_region: ${{ vars.AWS_REGION }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
 
@@ -86,6 +86,10 @@ jobs:
           TF_VAR_route53_zone_id: ${{ vars.ROUTE53_ZONE_ID }}
           TF_VAR_keycloak_issuer_url: ${{ vars.KEYCLOAK_ISSUER_URL }}
           TF_VAR_keycloak_client_id: ${{ vars.KEYCLOAK_CLIENT_ID }}
+          # Falls back rather than passing through empty: an unset repo
+          # variable would override the variables.tf default with "" and
+          # leave the SSO button on the login page with no text at all.
+          TF_VAR_keycloak_label: ${{ vars.KEYCLOAK_LABEL || 'Keycloak SSO' }}
           TF_VAR_keycloak_client_secret: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
         run: |
           terraform apply -auto-approve -input=false \
