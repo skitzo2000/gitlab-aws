@@ -19,6 +19,17 @@ on:
           the S3 copy, but GitLab's data does not.
         type: boolean
         default: false
+      replace_cp:
+        description: >-
+          Force-replace the control plane, for the same reason. Note that a
+          spot instance also cannot be RESIZED: Terraform stops it, calls
+          ModifyInstanceAttribute, gets UnsupportedOperation, and leaves it
+          stopped — so a cp still on spot blocks every apply once its type
+          drifts from the code. Rebuilds k3s (server state, NAT config) from
+          scratch; the EIP is a separate resource and is re-associated, so
+          the public address, DNS record and certificate are unaffected.
+        type: boolean
+        default: false
 
 # The runner holds no AWS credentials — it assumes the deployer role
 # (created by bootstrap/) via GitHub's OIDC federation, valid only for
@@ -93,7 +104,8 @@ jobs:
           TF_VAR_keycloak_client_secret: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
         run: |
           terraform apply -auto-approve -input=false \
-            ${{ inputs.replace_workers && '-replace=aws_instance.worker[0] -replace=aws_instance.worker[1]' || '' }}
+            ${{ inputs.replace_workers && '-replace=aws_instance.worker[0] -replace=aws_instance.worker[1]' || '' }} \
+            ${{ inputs.replace_cp && '-replace=aws_instance.cp' || '' }}
 
       # The gitlab_cert role reaches S3 through scripts/aws, which uses the
       # runner's own CLI under the assumed role — no boto3, no collections,
