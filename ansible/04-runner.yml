@@ -1,0 +1,10 @@
+---
+# Phase 4 — Software: GitLab Runner. Waits on GitLab's readiness endpoint
+# (which also proves DNS + the cert), then registers an instance runner and
+# deploys it.
+
+- name: Software — GitLab Runner
+  hosts: control_plane
+  become: true
+  roles:
+    - gitlab_runner

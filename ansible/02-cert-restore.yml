@@ -1,0 +1,12 @@
+---
+# Phase 2 — Certificate (restore). Publish the stored cert as a Secret BEFORE
+# GitLab starts, so the seed-cert initContainer finds it on first boot and no
+# Let's Encrypt issuance is spent. No-op when cert_bucket is unset.
+
+- name: Certificate — restore from S3 (before GitLab starts)
+  hosts: control_plane
+  become: true
+  roles:
+    - role: gitlab_cert
+      vars:
+        gitlab_cert_action: restore
