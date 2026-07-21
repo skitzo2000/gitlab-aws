@@ -8,6 +8,17 @@ on:
       - "ansible/**"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
+    inputs:
+      replace_workers:
+        description: >-
+          Force-replace both workers. Needed when the running instances can no
+          longer be started (spot capacity) or otherwise drift from the code in
+          a way Terraform can't see — instance_market_options only applies at
+          creation, so flipping use_spot never converts a live instance.
+          Destroys the worker root volumes; the GitLab certificate survives via
+          the S3 copy, but GitLab's data does not.
+        type: boolean
+        default: false
 
 # The runner holds no AWS credentials — it assumes the deployer role
 # (created by bootstrap/) via GitHub's OIDC federation, valid only for
@@ -76,15 +87,15 @@ jobs:
           TF_VAR_keycloak_issuer_url: ${{ vars.KEYCLOAK_ISSUER_URL }}
           TF_VAR_keycloak_client_id: ${{ vars.KEYCLOAK_CLIENT_ID }}
           TF_VAR_keycloak_client_secret: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
-        run: terraform apply -auto-approve -input=false
-
-      # boto3 and amazon.aws back the gitlab_cert role's S3 calls, which run
-      # on this runner under the assumed role — never on the cluster nodes.
-      - name: Install Ansible
         run: |
-          python3 -m pip install --user ansible-core boto3
-          ansible-galaxy collection install -r ansible/requirements.yml
-        working-directory: .
+          terraform apply -auto-approve -input=false \
+            ${{ inputs.replace_workers && '-replace=aws_instance.worker[0] -replace=aws_instance.worker[1]' || '' }}
+
+      # The gitlab_cert role reaches S3 through scripts/aws, which uses the
+      # runner's own CLI under the assumed role — no boto3, no collections,
+      # and nothing AWS-aware ever installed on the cluster nodes.
+      - name: Install Ansible
+        run: python3 -m pip install --user ansible-core
 
       - name: Configure cluster (k3s + GitLab + runner)
         working-directory: ansible
