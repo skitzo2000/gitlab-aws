@@ -20,8 +20,11 @@ resource "aws_internet_gateway" "this" {
   }
 }
 
-# Single public subnet, single AZ: no NAT gateway, no cross-AZ traffic — this
-# is a demo platform optimized for cost, not availability.
+# Two subnets, one AZ, no NAT gateway, no cross-AZ traffic — a demo platform
+# optimized for cost. The cp (public subnet, EIP) doubles as the NAT instance
+# for the private subnet where the workers live: $0 vs ~$32/mo for a managed
+# NAT gateway. Ansible configures the masquerading (nat_gateway role);
+# Terraform provides the routing + disables the cp's source/dest check.
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.this.id
   cidr_block              = var.subnet_cidr
@@ -49,4 +52,35 @@ resource "aws_route_table" "public" {
 resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
   route_table_id = aws_route_table.public.id
+}
+
+resource "aws_subnet" "private" {
+  vpc_id            = aws_vpc.this.id
+  cidr_block        = var.private_subnet_cidr
+  availability_zone = data.aws_availability_zones.available.names[0]
+
+  tags = {
+    Name = "${var.project}-private"
+  }
+}
+
+resource "aws_route_table" "private" {
+  vpc_id = aws_vpc.this.id
+
+  tags = {
+    Name = "${var.project}-private"
+  }
+}
+
+# Default route via the cp's ENI. Separate aws_route (not inline) because it
+# depends on the instance, and instance replacement must not replace the table.
+resource "aws_route" "private_default" {
+  route_table_id         = aws_route_table.private.id
+  destination_cidr_block = "0.0.0.0/0"
+  network_interface_id   = aws_instance.cp.primary_network_interface_id
+}
+
+resource "aws_route_table_association" "private" {
+  subnet_id      = aws_subnet.private.id
+  route_table_id = aws_route_table.private.id
 }

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Thin `aws` shim: the real CLI when it's installed (CI runners), the official
+# container otherwise (laptops). Exists so the Ansible roles can reach S3
+# through a plain command instead of amazon.aws + boto3 — the collection's
+# modules import boto3 in the CONTROLLER's interpreter, which a containerised
+# CLI can't satisfy, and requiring a pip install on every machine that runs
+# the playbook is a worse trade than this eight-line wrapper.
+#
+# Same contract either way: argv is passed through verbatim, $AWS_REGION (or
+# --region in argv) selects the region, exit status is the CLI's own.
+#
+#   scripts/aws s3 cp /tmp/x s3://bucket/key
+set -euo pipefail
+
+if command -v aws >/dev/null 2>&1; then
+  exec aws "$@"
+fi
+
+# /tmp is mounted so `s3 cp` can see files staged by the caller; ~/.aws is
+# read-only. Region comes from the environment rather than a flag so callers
+# don't have to care which path they got.
+exec docker run --rm \
+  -v "$HOME/.aws:/root/.aws:ro" \
+  -v /tmp:/tmp \
+  -e AWS_REGION -e AWS_DEFAULT_REGION \
+  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
+  amazon/aws-cli "$@"

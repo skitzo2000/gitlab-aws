@@ -51,21 +51,11 @@ resource "aws_s3_bucket_public_access_block" "state" {
   restrict_public_buckets = true
 }
 
-resource "aws_dynamodb_table" "lock" {
-  name         = "${var.project}-tf-lock"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-}
-
 # --- The deployer role (what the GitHub runner becomes) ---------------------
-# Minimal by construction: EC2 locked to one region, state bucket + lock
-# table, optionally record-changes on ONE Route 53 zone. No IAM actions at
-# all — the platform creates no IAM resources, and the role can't escalate.
+# Minimal by construction: EC2 locked to one region, the state bucket
+# (S3-native lockfile included), optionally record-changes on ONE Route 53
+# zone. No IAM actions at all — the platform creates no IAM resources, and
+# the role can't escalate.
 
 resource "aws_iam_role" "deployer" {
   name = "${var.project}-deployer"
@@ -117,11 +107,18 @@ resource "aws_iam_role_policy" "deployer" {
           Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
           Resource = "${aws_s3_bucket.state.arn}/*"
         },
+        # The bucket encrypts with the AWS-managed aws/s3 key. That key's
+        # policy delegates to IAM, so S3 permissions alone aren't enough —
+        # without this, writing state fails AccessDenied. ViaService keeps the
+        # grant usable only through S3, never against the key directly.
         {
-          Sid      = "StateLock"
+          Sid      = "StateEncryption"
           Effect   = "Allow"
-          Action   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:DescribeTable"]
-          Resource = aws_dynamodb_table.lock.arn
+          Action   = ["kms:Decrypt", "kms:GenerateDataKey"]
+          Resource = "*"
+          Condition = {
+            StringEquals = { "kms:ViaService" = "s3.${var.region}.amazonaws.com" }
+          }
         },
       ],
       var.route53_zone_id != "" ? [
@@ -153,10 +150,10 @@ resource "local_file" "backend_override" {
   content = <<-EOT
     terraform {
       backend "s3" {
-        bucket         = "${aws_s3_bucket.state.bucket}"
-        key            = "${var.project}/terraform.tfstate"
-        region         = "${var.region}"
-        dynamodb_table = "${aws_dynamodb_table.lock.name}"
+        bucket       = "${aws_s3_bucket.state.bucket}"
+        key          = "${var.project}/terraform.tfstate"
+        region       = "${var.region}"
+        use_lockfile = true
       }
     }
   EOT

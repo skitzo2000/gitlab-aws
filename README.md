@@ -16,16 +16,19 @@ default package set); Terraform generates the Ansible inventory and hands off.
                 gitlab.<eip>.sslip.io  (free wildcard DNS, zero setup)
                               │
    ┌──────────────────────────┼──────────────────────────────────────┐
-   │  VPC 10.60.0.0/16 · one public subnet · no NAT (cost: $0)       │
+   │  VPC 10.60.0.0/16 · no NAT gateway, no ALB — the cp is both     │
    │                          │                                      │
-   │  ┌───────────────────────┴─────┐                                │
-   │  │ cp · t3a.small · spot       │   k3s server                   │
+   │  public 10.60.1.0/24     │                                      │
+   │  ┌───────────────────────┴─────┐   k3s server · svclb ingress   │
+   │  │ cp · t3a.small              │   + NAT for the workers        │
    │  │ TAINTED NoSchedule ─────────┼── nothing schedules here,      │
-   │  │ (svclb fwds 80/5050/2222)   │   so it stays tiny             │
+   │  │ (svclb fwds 80/443/5050/    │   so it stays tiny             │
+   │  │  2222; MASQUERADEs egress)  │                                │
    │  └─────────────┬───────────────┘                                │
-   │                │ k3s join                                       │
+   │                │ k3s join · worker egress                       │
+   │  private 10.60.2.0/24 · no public IPs · default route -> cp     │
    │  ┌─────────────┴───────┐   ┌─────────────────────┐              │
-   │  │ worker-1 t3a.large  │   │ worker-2 t3a.large  │   spot, AMD  │
+   │  │ worker-1 m6a.large  │   │ worker-2 m6a.large  │   AMD        │
    │  │ GitLab omnibus pod  │   │ gitlab-runner +     │              │
    │  │ (CE image, registry │   │ CI job pods (dind)  │              │
    │  │  enabled, 30Gi PVC) │   │                     │              │
@@ -38,9 +41,10 @@ Design decisions:
 | Decision | Why |
 |---|---|
 | k3s, control plane **tainted `NoSchedule`** | Properly cordons CP from workloads → CP can be a $4/mo t3a.small |
+| **cp doubles as the NAT instance**; workers are in a private subnet with no public IPs | No NAT gateway (~$32/mo) and no per-worker IPv4 charges; workers unreachable from the internet; their (private) addresses are stable, so the Ansible inventory survives stop/starts and spot reclaims. Ansible SSHes to them through the cp (ProxyCommand in the generated inventory) |
 | **Omnibus image** (`gitlab/gitlab-ce`) as one Deployment | Simpler all around vs. the cloud-native Helm chart; registry, wiki, everything in one container |
 | GitLab's 4Gi memory request | Effectively dedicates worker-1 to GitLab; runner + jobs land on worker-2 |
-| AMD (`t3a`) **persistent spot**, interruption = *stop* | ~70% off on-demand; instances stop (not terminate) on reclaim; you can also stop them yourself between demos |
+| AMD **on-demand**; workers are **non-burstable `m6a.large`** | Launches never stall on capacity and nothing stops mid-demo. Non-burstable workers because fresh `t*` instances start credit-empty and throttle to 30%/vCPU exactly when the first GitLab boot needs CPU most (20+ min boots) — m6a always has 100% of its CPU, no credit concept at all. The cp stays a `t3a.small` (k3s idles at ~3% CPU). `use_spot = true` brings back spot for ~70% off, with the reliability tradeoffs |
 | EIP on the **control plane** + `sslip.io` | k3s svclb tolerates the CP taint and binds 80/5050/2222 on every node, so the CP's stable IP fronts the GitLab pod wherever it runs. URL never changes across rebuilds of workers |
 | Manifests via k3s **auto-deploy dir** | Ansible just templates YAML into `/var/lib/rancher/k3s/server/manifests/` — no kubectl apply, no helm, no python k8s deps |
 | Runner config **pre-provisioned** | Ansible creates an instance runner through the GitLab API and templates a complete `config.toml` (kubernetes executor, privileged for dind) into a Secret — the runner pod just runs, no `register` step |
@@ -52,18 +56,52 @@ Design decisions:
 
 | Item | Running | Stopped |
 |---|---|---|
-| 1× t3a.small spot | ~$0.006/hr | — |
-| 2× t3a.large spot | ~$0.055/hr | — |
+| 1× t3a.small on-demand | ~$0.019/hr | — |
+| 2× m6a.large on-demand | ~$0.173/hr | — |
 | 100 GB gp3 EBS | ~$0.011/hr | ~$0.011/hr |
-| 3× public IPv4 | ~$0.015/hr | ~$0.005/hr (EIP only) |
-| **Total** | **~$0.09/hr** | **~$0.02/hr** |
+| 1× public IPv4 (the EIP) | ~$0.005/hr | ~$0.005/hr |
+| **Total** | **~$0.21/hr** | **~$0.02/hr** |
 
-Stop between demos: `aws ec2 stop-instances --instance-ids ...` (persistent spot
-supports stop/start; the EIP — and therefore all URLs — survives).
+(`use_spot = true` cuts the running cost to ~$0.08/hr if you accept spot's
+launch stalls and mid-demo reclaims.)
+
+## Cluster lifecycle — `scripts/cluster.sh`
+
+One script drives the whole lifecycle, from a laptop (no aws CLI needed —
+it falls back to `docker run amazon/aws-cli`) or from a CI runner:
+
+```bash
+scripts/cluster.sh status    # instance states + URLs
+scripts/cluster.sh stop      # park between demos (~$0.02/hr)
+scripts/cluster.sh start     # resume — URLs answer ~3 min later, all self-healing
+scripts/cluster.sh deploy    # create from nothing OR update in place (apply + playbook)
+scripts/cluster.sh destroy   # full teardown; asks for confirmation (--yes for CI)
+```
+
+**stop/start is the intended park mode**: the EIP — and therefore DNS, the
+Let's Encrypt cert, and every URL — plus all GitLab data survive, and on
+`start` the whole stack (k3s, NAT, GitLab, runner) comes back with no
+further action. If your IP changed while parked, run `terraform apply` to
+refresh `admin_cidr` (only SSH/kubectl are gated; public URLs work
+regardless). **destroy** is the nuclear option: it releases the EIP and
+wipes the cert — the next deploy re-issues against Let's Encrypt's limit of
+5 duplicate certs per rolling week.
+
+The raw commands, if you want them without the script:
+
+```bash
+aws ec2 stop-instances --instance-ids $(aws ec2 describe-instances \
+  --filters Name=tag:Project,Values=gitlab-demo Name=instance-state-name,Values=running \
+  --query 'Reservations[].Instances[].InstanceId' --output text)
+
+aws ec2 start-instances --instance-ids $(aws ec2 describe-instances \
+  --filters Name=tag:Project,Values=gitlab-demo Name=instance-state-name,Values=stopped \
+  --query 'Reservations[].Instances[].InstanceId' --output text)
+```
 
 ## Prerequisites
 
-- Terraform ≥ 1.5, AWS credentials configured
+- Terraform ≥ 1.10, AWS credentials configured
 - Ansible (`pip install ansible-core` — only builtin modules are used, no
   galaxy collections)
 
@@ -80,15 +118,15 @@ git push (main) ──► GitHub Actions ──► OIDC ──► IAM deployer r
 The runner holds **no AWS credentials**: the workflow assumes an IAM role via
 GitHub's OIDC federation, trusted only for this repo's `main` branch. The
 role is minimal by construction — `ec2:*` locked to one region, the Terraform
-state bucket + lock table, optionally record-changes on your one Route 53
-zone, and **zero IAM permissions** (the platform creates no IAM resources,
+state bucket (S3-native locking, no DynamoDB), optionally record-changes on
+your one Route 53 zone, and **zero IAM permissions** (the platform creates no IAM resources,
 so the role cannot escalate).
 
 One-time setup (with your own admin credentials):
 
 ```bash
 cd bootstrap
-terraform init && terraform apply     # OIDC provider, deployer role, S3 state, lock table
+terraform init && terraform apply     # OIDC provider, deployer role, S3 state bucket
 terraform output github_setup         # gh CLI commands: repo variables + optional secrets
 ```
 
@@ -155,9 +193,9 @@ terraform output -raw gitlab_root_password
 ```
 
 Log in as `root`. The registry lives at `terraform output registry_host`.
-The playbook is idempotent — re-run it any time. (If you stop/start the
-workers their public IPs change; run `terraform apply` again to refresh the
-inventory before re-running Ansible.)
+The playbook is idempotent — re-run it any time. (Workers are addressed by
+their stable private IPs through the cp, so the inventory survives
+stop/starts and spot reclaims — no re-apply needed.)
 
 Get kubectl access:
 
@@ -199,13 +237,18 @@ To use a real domain, set it in your `terraform.tfvars`:
 
 ```hcl
 domain          = "demo.example.com"          # GitLab becomes gitlab.demo.example.com
-route53_zone_id = "Z0123456789ABCDEFGHIJ"     # optional — omit if DNS is hosted elsewhere
+route53_zone_id = "Z0123456789ABCDEFGHIJ"     # if the zone is in Route 53
+# — or —
+cloudflare_zone_id   = "023e105f4ecef8ad9ca31a8372d0c353"  # if the zone is at Cloudflare
+cloudflare_api_token = "<token with Zone:DNS:Edit>"
 ```
 
-With a Route 53 zone ID, Terraform manages the `A` record to the EIP itself.
-Without one, `terraform output dns_record` prints the single record to create
-at your DNS host (the EIP is stable, so it's set-once) — **create it before
-running the playbook**, since Let's Encrypt validates against it. The hostname
+With a Route 53 or Cloudflare zone, Terraform manages the `A` record to the
+EIP itself (on Cloudflare it's forced DNS-only/grey-cloud — the proxy would
+break Let's Encrypt and the registry/git-ssh ports). With neither,
+`terraform output dns_record` prints the single record to create at your DNS
+host (the EIP is stable, so it's set-once) — **create it before running the
+playbook**, since Let's Encrypt validates against it. The hostname
 flows from this one variable into GitLab's `external_url`, the registry URL,
 and the runner config — after changing it, run `terraform apply` and re-run
 the playbook so GitLab reconfigures (data is untouched).
@@ -286,8 +329,8 @@ depends on) — checks live on the generated group_vars file in
 - The initial root password is in Terraform state, the generated
   `ansible/inventory/group_vars/all.yml`, and the rendered manifest on the
   CP's disk. Demo-grade secret handling.
-- Spot reclaims *stop* the instances; start them again and everything
-  (including the runner) comes back on its own.
+- Stop/start (yours, or spot reclaims if `use_spot = true`) is fully
+  supported: everything, including the runner, comes back on its own.
 - SSH key is generated by Terraform and written to
   `terraform/gitlab-demo-key.pem` (gitignored, as is `ansible/inventory/`).
 
@@ -300,6 +343,6 @@ depends on) — checks live on the generated group_vars file in
 | Workers not joining | `journalctl -u k3s-agent` on a worker |
 | Cert not issued / readiness wait loops in HTTPS mode | Does the DNS record exist and point at the EIP? `kubectl -n gitlab logs deploy/gitlab \| grep -i letsencrypt`; LE rate limits are per-domain (5 duplicate certs/week) |
 | SSO button missing or login fails | Issuer URL must match Keycloak's realm URL exactly (discovery is on); check the client secret and that the redirect URI is registered; `kubectl -n gitlab logs deploy/gitlab \| grep -i omniauth` |
-| Ansible can't connect | Did `terraform apply` finish? Worker IPs change on stop/start — re-apply to refresh the inventory |
+| Ansible can't connect | Did `terraform apply` finish? Is your IP still `admin_cidr`? Workers are reached *through* the cp (ProxyCommand) — if `ssh` to the cp fails, workers fail too. Worker egress needs the cp's `nat-gateway` service: `systemctl status nat-gateway` on the cp |
 | Repo import by URL fails | GitLab (on AWS) must reach the source URL; if it resolves to a private IP, allow it in *Admin → Settings → Network → Outbound requests* |
 | CI deploy fails at AssumeRole | Bootstrap run? Repo variables set (`terraform output github_setup`)? Workflow must run on `main` — the role trusts only that branch |

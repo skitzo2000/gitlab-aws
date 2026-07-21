@@ -1,0 +1,79 @@
+---
+# Drop cluster objects belonging to workers that no longer exist.
+#
+# Replacing a worker leaves two things behind that quietly break the next
+# deploy: the old Node object sits NotReady forever, and the local-path PV is
+# pinned by nodeAffinity to that dead node, so the GitLab pod has nowhere to
+# schedule and stays Pending with no obvious cause.
+#
+# Only nodes absent from the CURRENT Terraform-generated inventory are
+# touched, so this can't remove a node that is merely rebooting.
+
+- name: List the nodes k3s knows about
+  ansible.builtin.command:
+    argv: [kubectl, get, nodes, -o, "jsonpath={range .items[*]}{.metadata.name}{'\\n'}{end}"]
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: known_nodes
+  changed_when: false
+
+- name: Work out which of them are gone
+  ansible.builtin.set_fact:
+    # k3s names nodes after the hostname, which on these AMIs is ip-<dashed
+    # private IP> — the same values Terraform wrote into the inventory.
+    live_nodes: >-
+      {{ (groups['workers'] | map('extract', hostvars, 'ansible_host') | list
+          + [cp_private_ip])
+         | map('regex_replace', '^(.*)$', 'ip-\1')
+         | map('regex_replace', '\.', '-') | list }}
+
+- name: Remove nodes with no matching instance
+  ansible.builtin.command:
+    argv: [kubectl, delete, node, "{{ item }}", --ignore-not-found]
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  loop: "{{ known_nodes.stdout_lines | difference(live_nodes) }}"
+  register: pruned
+
+# The PV outlives its node. With reclaimPolicy Delete, dropping the claim
+# takes the PV with it and local-path provisions a fresh directory on a live
+# worker — which is exactly the empty /etc/gitlab/ssl the seed-cert
+# initContainer restores the certificate into.
+- name: Drop a GitLab volume stranded on a removed node
+  when: pruned.changed
+  block:
+    - name: Find which node the GitLab volume is pinned to
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - get
+          - pv
+          - -o
+          - >-
+            jsonpath={range .items[?(@.spec.claimRef.name=='gitlab-data')]}
+            {.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values[0]}{end}
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      register: pv_node
+      changed_when: false
+      failed_when: false
+
+    - name: Delete the stranded claim
+      ansible.builtin.command:
+        argv: [kubectl, -n, gitlab, delete, pvc, gitlab-data, --ignore-not-found, --wait=false]
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      when:
+        - pv_node.stdout | trim | length > 0
+        - pv_node.stdout | trim not in live_nodes
+      register: claim_deleted
+
+    # Losing the claim means losing GitLab's database, and with it every
+    # runner registration. gitlab_runner skips re-registering whenever its
+    # manifest exists, so leaving the file behind would point a runner at a
+    # token the new GitLab has never heard of.
+    - name: Force the runner to re-register against the rebuilt GitLab
+      ansible.builtin.file:
+        path: "{{ k3s_manifests_dir }}/gitlab-runner.yaml"
+        state: absent
+      when: claim_deleted is changed

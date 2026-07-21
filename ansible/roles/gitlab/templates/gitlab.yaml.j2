@@ -42,6 +42,41 @@ spec:
       labels:
         app: gitlab
     spec:
+{% if gitlab_https %}
+      # Seed a certificate restored from S3, so a rebuilt node doesn't spend
+      # one of Let's Encrypt's five weekly issuances for this hostname.
+      # Deliberately does nothing if /etc/gitlab/ssl already holds a cert:
+      # GitLab owns the files once it has them and renews them in place, so a
+      # stale Secret can never overwrite a newer live cert. The Secret is
+      # optional — with no stored copy the initContainer is a no-op and
+      # omnibus issues from Let's Encrypt exactly as it did before.
+      initContainers:
+        - name: seed-cert
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              if [ -s /etc/gitlab/ssl/{{ gitlab_host }}.crt ]; then
+                echo "certificate already present — leaving it alone"
+              elif [ -s /seed/tls.crt ]; then
+                mkdir -p /etc/gitlab/ssl
+                cp /seed/tls.crt /etc/gitlab/ssl/{{ gitlab_host }}.crt
+                cp /seed/tls.key /etc/gitlab/ssl/{{ gitlab_host }}.key
+                chmod 600 /etc/gitlab/ssl/{{ gitlab_host }}.key
+                echo "seeded certificate from the stored copy"
+              else
+                echo "no stored certificate — Let's Encrypt will issue one"
+              fi
+          volumeMounts:
+            - name: data
+              subPath: config
+              mountPath: /etc/gitlab
+            - name: cert-seed
+              mountPath: /seed
+              readOnly: true
+{% endif %}
       containers:
         - name: gitlab
           image: {{ gitlab_image }}
@@ -60,6 +95,11 @@ spec:
 {% endif %}
                 gitlab_rails['initial_root_password'] = '{{ gitlab_root_password }}'
                 gitlab_rails['gitlab_shell_ssh_port'] = 2222
+                # /-/readiness and /-/liveness are IP-whitelisted (404 for
+                # everyone else). Kubelet probes arrive from the node IP and
+                # the playbook's readiness wait from a svclb-DNATed VPC/pod
+                # address — all within 10/8. Without this, probes 404 forever.
+                gitlab_rails['monitoring_whitelist'] = ['127.0.0.0/8', '10.0.0.0/8']
 {% if keycloak_enabled %}
                 # SSO against the external amnesia-labs Keycloak (OIDC).
                 # Password login stays enabled alongside SSO.
@@ -154,6 +194,13 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: gitlab-data
+{% if gitlab_https %}
+        # optional: absent on a first deploy with nothing stored yet
+        - name: cert-seed
+          secret:
+            secretName: gitlab-tls
+            optional: true
+{% endif %}
         - name: shm
           emptyDir:
             medium: Memory
@@ -169,6 +216,12 @@ metadata:
   namespace: gitlab
 spec:
   type: LoadBalancer
+  # Route to the pod even before its startup probe passes: Let's Encrypt's
+  # HTTP-01 challenge must reach nginx THROUGH this service to issue the
+  # cert, but the HTTPS startup probe can't pass until the cert exists —
+  # without this line, first boot in HTTPS mode deadlocks (refused on 80/443
+  # until the probe gives up). Mid-boot requests just get nginx 502s.
+  publishNotReadyAddresses: true
   selector:
     app: gitlab
   ports:

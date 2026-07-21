@@ -25,3 +25,8 @@
   ansible.builtin.wait_for:
     port: 6443
     timeout: 180
+
+# Replaced workers leave dead Node objects and a PV pinned to them, which
+# silently strands the GitLab pod. Runs before any manifest is applied.
+- name: Prune cluster objects left behind by replaced workers
+  ansible.builtin.include_tasks: prune_nodes.yml

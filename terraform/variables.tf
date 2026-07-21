@@ -46,6 +46,18 @@ variable "admin_cidr" {
   default     = "0.0.0.0/0"
 }
 
+variable "ci_cidr" {
+  description = <<-EOT
+    Additional CIDR granted the same admin access as admin_cidr, set by the
+    deploy workflow to the runner's own IP. It exists so CI doesn't have to
+    overwrite admin_cidr: the runner needs SSH for the Ansible phase, but a
+    pipeline run must not lock your laptop out of SSH/kubectl until the next
+    local apply. Empty (the default) adds nothing.
+  EOT
+  type        = string
+  default     = ""
+}
+
 # --- 3. DNS & HTTPS ----------------------------------------------------------
 # Leaving `domain` empty gives a zero-setup HTTP demo at
 # gitlab.<eip>.sslip.io. Setting it switches the whole platform to
@@ -59,7 +71,33 @@ variable "domain" {
 }
 
 variable "route53_zone_id" {
-  description = "Route 53 hosted zone ID for var.domain. If set, Terraform creates/owns the A record to the EIP. Empty = create the record at your DNS host yourself (see the dns_record output) BEFORE running the playbook."
+  description = "Route 53 hosted zone ID for var.domain. If set, Terraform creates/owns the A record to the EIP. Empty = Cloudflare (below) or create the record at your DNS host yourself (see the dns_record output) BEFORE running the playbook."
+  type        = string
+  default     = ""
+}
+
+variable "cloudflare_zone_id" {
+  description = "Cloudflare zone ID for var.domain (dashboard -> zone Overview). If set, Terraform creates/owns the A record to the EIP — always DNS-only (grey cloud): proxying breaks Let's Encrypt HTTP-01 and the non-HTTP ports (registry 5050, git-ssh 2222). Mutually exclusive with route53_zone_id."
+  type        = string
+  default     = ""
+}
+
+variable "cloudflare_api_token" {
+  description = "Cloudflare API token with Zone:DNS:Edit on that zone (dash.cloudflare.com/profile/api-tokens). Required when cloudflare_zone_id is set."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "cert_bucket" {
+  description = <<-EOT
+    S3 bucket holding the durable copy of the Let's Encrypt certificate
+    (normally the Terraform state bucket — see bootstrap's state_bucket
+    output). The live cert sits on a local-path PVC, i.e. one worker's root
+    volume; without this, replacing that worker spends one of Let's Encrypt's
+    five weekly issuances for the hostname. Empty disables persistence and
+    restores the old behaviour of issuing on every rebuild.
+  EOT
   type        = string
   default     = ""
 }
@@ -103,9 +141,9 @@ variable "keycloak_label" {
 # --- 5. Sizing & cost --------------------------------------------------------
 
 variable "use_spot" {
-  description = "Run all nodes as persistent spot instances (interruption behavior = stop; ~70% off, also lets you stop the cluster between demos). false = on-demand."
+  description = "false (default) = on-demand: launches always succeed, stop/start is fully under your control, no reclaim surprises. true = persistent spot (~70% off compute, but launches can stall on capacity and AWS can stop instances under you)."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "cp_instance_type" {
@@ -115,9 +153,9 @@ variable "cp_instance_type" {
 }
 
 variable "worker_instance_type" {
-  description = "Worker instance type. One worker hosts GitLab omnibus (~5 GiB RAM), the other the runner + CI job pods."
+  description = "Worker instance type. One worker hosts GitLab omnibus (~5 GiB RAM), the other the runner + CI job pods. Non-burstable (m6a) by design: fresh burstable (t*) instances start with zero CPU credits and throttle to 30%/vCPU exactly when the first GitLab boot needs CPU most (20+ min boots). t* workers get standard credits — expect slow first boots."
   type        = string
-  default     = "t3a.large"
+  default     = "m6a.large"
 }
 
 variable "worker_count" {
@@ -168,9 +206,15 @@ variable "vpc_cidr" {
 }
 
 variable "subnet_cidr" {
-  description = "Public subnet CIDR (single subnet, single AZ — no NAT, by design)."
+  description = "Public subnet CIDR (control plane + EIP live here)."
   type        = string
   default     = "10.60.1.0/24"
+}
+
+variable "private_subnet_cidr" {
+  description = "Private subnet CIDR (workers live here, no public IPs; egress via the cp acting as NAT)."
+  type        = string
+  default     = "10.60.2.0/24"
 }
 
 variable "cp_private_ip" {

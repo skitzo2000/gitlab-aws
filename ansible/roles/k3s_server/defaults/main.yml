@@ -1,0 +1,4 @@
+---
+# Where k3s picks up manifests to auto-apply. Matches the gitlab and
+# gitlab_runner roles, which write into the same directory.
+k3s_manifests_dir: /var/lib/rancher/k3s/server/manifests
