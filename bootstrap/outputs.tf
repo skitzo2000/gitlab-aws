@@ -19,12 +19,12 @@ output "github_setup" {
     gh variable set AWS_ROLE_ARN    --body "${aws_iam_role.deployer.arn}"
     gh variable set AWS_REGION      --body "${var.region}"
     gh variable set TF_STATE_BUCKET --body "${aws_s3_bucket.state.bucket}"
-    gh variable set ADMIN_CIDR      --body "1.2.3.4/32"   # your IP; CI adds its own via ci_cidr
+    gh variable set ADMIN_CIDR      --body "<your-ip>/32"  # CI adds its own via ci_cidr
 
     # Optional — real domain + HTTPS (walkthrough STEP 2). Note: the gitlab.
     # prefix is added for you, so this is the ZONE apex, not the final host.
-    # gh variable set GITLAB_DOMAIN      --body "example.com"
-    # gh variable set LETSENCRYPT_EMAIL  --body "admin@example.com"
+    # gh variable set GITLAB_DOMAIN      --body "<zone-apex>"
+    # gh variable set LETSENCRYPT_EMAIL  --body "<you>@<zone-apex>"
     #
     # ...with DNS at Cloudflare (the token needs Zone:DNS:Edit on that zone):
     # gh variable set CLOUDFLARE_ZONE_ID --body "<zone id>"

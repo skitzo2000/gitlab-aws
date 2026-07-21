@@ -35,7 +35,12 @@ DEVICE=/dev/sdf # Nitro renames this; we locate the real node by size below
 AWS_BIN="$(type -P aws || true)"
 aws() {
   if [ -n "$AWS_BIN" ]; then "$AWS_BIN" --region "$REGION" "$@"
-  else docker run --rm -v "$HOME/.aws:/root/.aws:ro" amazon/aws-cli --region "$REGION" "$@"; fi
+  else
+    # /tmp is mounted too: the recovered pair is staged there and `s3 cp`
+    # has to see it from inside the container.
+    docker run --rm -v "$HOME/.aws:/root/.aws:ro" -v /tmp:/tmp \
+      amazon/aws-cli --region "$REGION" "$@"
+  fi
 }
 
 instance_id() { # $1 = Name tag
@@ -87,44 +92,53 @@ for n in 1 2; do
   aws ec2 wait volume-in-use --volume-id "$VOL"
   sleep 5
 
-  # Read-only, and by partition rather than whole disk. nouuid keeps the
-  # kernel from tripping over a filesystem UUID identical to the cp's own.
-  FOUND="$(ssh_cp "bash -s" <<REMOTE || true
-set -e
-sudo mkdir -p /mnt/rescue
-dev=\$(lsblk -rno NAME,SIZE,TYPE | awk '\$3=="part" && \$2=="40G" {print \$1; exit}')
-[ -n "\$dev" ] || dev=\$(lsblk -rno NAME,TYPE | awk '\$2=="part"' | tail -1 | cut -d' ' -f1)
-sudo mount -o ro,nouuid "/dev/\$dev" /mnt/rescue 2>/dev/null || sudo mount -o ro "/dev/\$dev" /mnt/rescue
-src=\$(sudo find /mnt/rescue/var/lib/rancher/k3s/storage -path '*/config/ssl/$HOST.crt' 2>/dev/null | head -1)
-[ -n "\$src" ] || { echo "NOTFOUND"; exit 0; }
-sudo cat "\$src" > /tmp/$HOST.crt
-sudo cat "\${src%.crt}.key" > /tmp/$HOST.key
-echo FOUND
+  # Mount read-only. The attached disk is identified as the largest partition
+  # with no mountpoint — matching on size alone is wrong, since a 40 GiB
+  # volume presents its partition as 39.9G. nouuid keeps the kernel from
+  # tripping over a filesystem UUID identical to the cp's own.
+  #
+  # Verification and packing happen on the cp: it has openssl, this machine
+  # may not. The pair comes back base64-encoded over the same SSH channel,
+  # so nothing is left behind in /tmp on either end.
+  OUT="$(ssh_cp "sudo bash -s" <<REMOTE || true
+set -euo pipefail
+mkdir -p /mnt/rescue
+dev=\$(lsblk -rno NAME,TYPE,SIZE,MOUNTPOINT | awk '\$2=="part" && \$4=="" {print \$3, \$1}' \\
+  | sed 's/G / /' | sort -rn | head -1 | awk '{print \$2}')
+[ -n "\$dev" ] || { echo "NO_UNMOUNTED_PARTITION"; exit 0; }
+mount -o ro,nouuid "/dev/\$dev" /mnt/rescue 2>/dev/null || mount -o ro "/dev/\$dev" /mnt/rescue
+src=\$(find /mnt/rescue/var/lib/rancher/k3s/storage -path '*/config/ssl/$HOST.crt' 2>/dev/null | head -1)
+if [ -z "\$src" ]; then umount /mnt/rescue; echo "NO_CERT_HERE"; exit 0; fi
+key="\${src%.crt}.key"
+openssl x509 -in "\$src" -noout -checkend 0 || { umount /mnt/rescue; echo "EXPIRED"; exit 0; }
+[ "\$(openssl x509 -in "\$src" -noout -pubkey)" = "\$(openssl pkey -in "\$key" -pubout)" ] \\
+  || { umount /mnt/rescue; echo "KEY_MISMATCH"; exit 0; }
+echo "ENDDATE \$(openssl x509 -in "\$src" -noout -enddate | cut -d= -f2)"
+echo "CRT \$(base64 -w0 "\$src")"
+echo "KEY \$(base64 -w0 "\$key")"
+umount /mnt/rescue
 REMOTE
 )"
 
-  if [ "${FOUND%%$'\n'*}" != "FOUND" ] && ! grep -q FOUND <<<"$FOUND"; then
-    echo "    no certificate for $HOST on this volume"
-    restore_volume; trap - EXIT; continue
-  fi
+  case "$OUT" in
+    *NO_CERT_HERE*|*NO_UNMOUNTED_PARTITION*)
+      echo "    no certificate for $HOST on this volume"
+      restore_volume; trap - EXIT; continue ;;
+    *EXPIRED*)      echo "error: certificate on $WORKER is expired" >&2; exit 1 ;;
+    *KEY_MISMATCH*) echo "error: key on $WORKER does not match the certificate" >&2; exit 1 ;;
+  esac
+  grep -q '^CRT ' <<<"$OUT" || { echo "error: could not read the pair:" >&2; echo "$OUT" >&2; exit 1; }
 
-  echo "==> found the certificate — copying it out"
-  scp -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    admin@"$CP_IP":"/tmp/$HOST.crt" admin@"$CP_IP":"/tmp/$HOST.key" /tmp/ 2>/dev/null || {
-    scp -i "$KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      admin@"$CP_IP":"/tmp/$HOST.{crt,key}" /tmp/; }
-  ssh_cp "rm -f /tmp/$HOST.crt /tmp/$HOST.key"
+  echo "==> recovered, valid until $(grep '^ENDDATE ' <<<"$OUT" | cut -d' ' -f2-)"
+  TMP="$(mktemp -d)"
+  grep '^CRT ' <<<"$OUT" | cut -d' ' -f2 | base64 -d > "$TMP/$HOST.crt"
+  grep '^KEY ' <<<"$OUT" | cut -d' ' -f2 | base64 -d > "$TMP/$HOST.key"
+  [ -s "$TMP/$HOST.crt" ] && [ -s "$TMP/$HOST.key" ] \
+    || { echo "error: decoded certificate or key is empty" >&2; rm -rf "$TMP"; exit 1; }
 
-  openssl x509 -in "/tmp/$HOST.crt" -noout -checkend 0 \
-    || { echo "error: recovered certificate is expired" >&2; exit 1; }
-  [ "$(openssl x509 -in "/tmp/$HOST.crt" -noout -pubkey)" = \
-    "$(openssl pkey -in "/tmp/$HOST.key" -pubout)" ] \
-    || { echo "error: recovered key does not match the certificate" >&2; exit 1; }
-
-  echo "==> valid until $(openssl x509 -in "/tmp/$HOST.crt" -noout -enddate | cut -d= -f2)"
-  aws s3 cp "/tmp/$HOST.crt" "s3://$CERT_BUCKET/certs/$HOST/$HOST.crt"
-  aws s3 cp "/tmp/$HOST.key" "s3://$CERT_BUCKET/certs/$HOST/$HOST.key"
-  rm -f "/tmp/$HOST.crt" "/tmp/$HOST.key"
+  aws s3 cp "$TMP/$HOST.crt" "s3://$CERT_BUCKET/certs/$HOST/$HOST.crt"
+  aws s3 cp "$TMP/$HOST.key" "s3://$CERT_BUCKET/certs/$HOST/$HOST.key"
+  rm -rf "$TMP"
 
   restore_volume; trap - EXIT
   echo
