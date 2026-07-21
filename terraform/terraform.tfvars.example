@@ -68,6 +68,15 @@
 # Empty = admin@<domain> is used.
 # letsencrypt_email = ""
 
+# Where to keep a durable copy of the issued certificate. The live cert lives
+# on a local-path PVC — a directory on one worker's root volume — so replacing
+# that worker otherwise spends one of Let's Encrypt's FIVE WEEKLY issuances
+# for the hostname. Point this at the Terraform state bucket (bootstrap's
+# state_bucket output): the cert is restored on deploy and re-uploaded after
+# every renewal, making rebuilds and full teardowns free of the LE budget.
+# Empty (the default) = no persistence, issue fresh on every rebuild.
+# cert_bucket = ""
+
 # -----------------------------------------------------------------------------
 # STEP 3 — SSO via the amnesia-labs Keycloak (requires STEP 2)
 # -----------------------------------------------------------------------------
