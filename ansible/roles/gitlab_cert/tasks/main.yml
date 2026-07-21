@@ -1,26 +1,49 @@
 ---
-# Durable Let's Encrypt certificate, kept in S3 so it outlives the nodes.
+# Durable certificate, kept in S3 so it outlives the nodes.
 #
-# The cert lives on a local-path PVC, i.e. a directory on one worker's root
-# volume — replace that worker and the cert goes with it, and the next deploy
-# spends one of Let's Encrypt's five weekly issuances for the hostname. This
-# role decouples the two: S3 holds the durable copy, the cluster holds the
-# live one.
+# The live cert sits on a local-path PVC, i.e. a directory on one worker's
+# root volume — replace that worker and it's gone, and the next deploy spends
+# one of Let's Encrypt's five weekly issuances for the hostname. This role
+# decouples the two: S3 holds the durable copy, the cluster holds the live one.
 #
-# Called twice from site.yml with gitlab_cert_action set to:
-#   restore  before the GitLab manifest is applied
-#   backup   after GitLab reports ready
+# Cert sources on a restore, in order of preference:
+#   1. the S3 copy               (restore.yml — free, no rate limit)
+#   2. an ACM exportable cert    (acm.yml — only if acm_fallback is on and S3
+#                                 was empty; survives a spent Let's Encrypt
+#                                 budget, since ACM has no weekly cap)
+#   3. Let's Encrypt             (omnibus issues, if nothing was seeded)
+# Whichever wins, backup.yml copies the live cert back to S3 afterwards, so
+# source 1 handles every subsequent rebuild and 2/3 are hit at most once.
 #
-# Set cert_bucket empty (the Terraform default) to switch the whole thing off
-# and let Let's Encrypt issue on every rebuild, as it did before.
+# Called twice from site.yml via gitlab_cert_action: restore (before the
+# GitLab manifest) and backup (after GitLab reports ready). Set cert_bucket
+# empty (the Terraform default) to switch the whole thing off.
 
 - name: Skip when no bucket is configured
   ansible.builtin.debug:
     msg: "cert_bucket is unset — certificate persistence is off."
   when: cert_bucket | default('') | length == 0
 
-- name: Run the requested action
-  ansible.builtin.include_tasks: "{{ gitlab_cert_action }}.yml"
+- name: Restore — S3 first, then the ACM fallback
   when:
     - cert_bucket | default('') | length > 0
     - gitlab_https | bool
+    - gitlab_cert_action == 'restore'
+  block:
+    - name: Restore the stored certificate from S3
+      ansible.builtin.include_tasks: restore.yml
+
+    # Only when S3 yielded nothing (stored.rc != 0) and the fallback is
+    # enabled. restore.yml always registers `stored`, so this is safe to read.
+    - name: Fall back to an ACM exportable certificate
+      ansible.builtin.include_tasks: acm.yml
+      when:
+        - acm_fallback | default(false) | bool
+        - stored.rc | default(1) != 0
+
+- name: Back up the live certificate to S3
+  ansible.builtin.include_tasks: backup.yml
+  when:
+    - cert_bucket | default('') | length > 0
+    - gitlab_https | bool
+    - gitlab_cert_action == 'backup'

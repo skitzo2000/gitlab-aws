@@ -115,6 +115,19 @@ resource "aws_iam_role_policy" "deployer" {
           Action   = ["s3:ListBucket"]
           Resource = aws_s3_bucket.state.arn
         },
+        # The cert role's ACM fallback runs on the runner under this role: it
+        # finds and exports an already-issued exportable cert. Export returns
+        # the private key, so keep this to the read/export verbs — issuing
+        # (RequestCertificate) is done by hand from a laptop, not here.
+        {
+          Sid      = "AcmExport"
+          Effect   = "Allow"
+          Action   = ["acm:ListCertificates", "acm:DescribeCertificate", "acm:ExportCertificate"]
+          Resource = "*"
+          Condition = {
+            StringEquals = { "aws:RequestedRegion" = var.region }
+          }
+        },
         {
           Sid      = "StateObjects"
           Effect   = "Allow"

@@ -102,6 +102,20 @@ variable "cert_bucket" {
   default     = ""
 }
 
+variable "acm_fallback" {
+  description = <<-EOT
+    When true, a rebuild whose S3 cert store is empty falls back to an ACM
+    exportable public certificate instead of Let's Encrypt. The point is that
+    Let's Encrypt caps a hostname at five duplicate certs a week; ACM has no
+    such limit, so a rebuild always comes up on HTTPS even after that budget
+    is spent. Requires the cert to exist first — run scripts/acm-provision.sh
+    once (that request costs $7/FQDN, and again on ACM's ~198-day renewal).
+    Exporting an already-issued cert, which every deploy does, is free.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "letsencrypt_email" {
   description = "Contact email for Let's Encrypt registration. Empty = admin@<domain>."
   type        = string

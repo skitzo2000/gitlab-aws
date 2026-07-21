@@ -39,8 +39,9 @@ resource "local_sensitive_file" "ansible_group_vars" {
     runner_image         = var.runner_image
     gitlab_root_password = random_password.gitlab_root.result
 
-    cert_bucket = var.cert_bucket
-    aws_region  = var.region # the cert role's S3 calls run in this region
+    cert_bucket  = var.cert_bucket
+    acm_fallback = var.acm_fallback
+    aws_region   = var.region # the cert role's S3/ACM calls run in this region
 
     keycloak_enabled       = var.keycloak_issuer_url != ""
     keycloak_issuer_url    = var.keycloak_issuer_url
@@ -81,6 +82,16 @@ resource "local_sensitive_file" "ansible_group_vars" {
     precondition {
       condition     = var.cert_bucket == "" || var.domain != ""
       error_message = "cert_bucket is set but domain is empty — there is no Let's Encrypt certificate to persist in HTTP/sslip.io mode (terraform.tfvars.example STEP 2)."
+    }
+
+    precondition {
+      condition     = !var.acm_fallback || var.domain != ""
+      error_message = "acm_fallback is on but domain is empty — an ACM public certificate is issued against the real hostname; there is nothing to fall back to in HTTP/sslip.io mode (terraform.tfvars.example STEP 2)."
+    }
+
+    precondition {
+      condition     = !var.acm_fallback || var.cert_bucket != ""
+      error_message = "acm_fallback is on but cert_bucket is empty — the exported ACM cert is cached in S3 so it's exported only once; set cert_bucket (STEP 2)."
     }
 
     precondition {

@@ -1,0 +1,127 @@
+---
+# Fallback cert source: an ACM exportable public certificate. Runs only when
+# the S3 restore found nothing AND acm_fallback is on — i.e. a rebuild with an
+# empty cert store. Its whole reason to exist is that Let's Encrypt caps a
+# hostname at five duplicate certificates a week; ACM has no such limit, so a
+# rebuild can always come up on HTTPS even after that budget is spent.
+#
+# It produces the exact same gitlab-tls Secret the S3 path does, so everything
+# downstream — the seed-cert initContainer, GitLab, the backup step — treats
+# it identically. And because backup then stores it to S3, ACM is touched
+# exactly once: the next rebuild takes the free S3 path and never re-exports.
+#
+# Cost note: issuing the cert (scripts/acm-provision.sh, run once by hand)
+# costs $7/FQDN and again on renewal. Exporting an already-issued cert, which
+# is all this task does, is free.
+
+- name: Export an ACM certificate and publish it as the TLS Secret
+  delegate_to: localhost
+  become: false
+  run_once: true
+  block:
+    - name: Find an issued, exportable ACM certificate for the host
+      ansible.builtin.command:
+        argv:
+          - "{{ aws_cli }}"
+          - acm
+          - list-certificates
+          - --includes
+          - keyTypes=RSA_2048,RSA_3072,RSA_4096
+          - --query
+          - >-
+            CertificateSummaryList[?DomainName=='{{ gitlab_host }}'
+            && Status=='ISSUED' && ExportOption=='ENABLED'].CertificateArn | [0]
+          - --output
+          - text
+      environment:
+        AWS_REGION: "{{ aws_region | default('us-east-1') }}"
+      register: acm_lookup
+      changed_when: false
+      failed_when: false
+
+    - name: Report when no exportable certificate exists
+      ansible.builtin.debug:
+        msg: >-
+          acm_fallback is on but no ISSUED exportable ACM certificate exists
+          for {{ gitlab_host }} — run scripts/acm-provision.sh once to create
+          one (that call costs $7). Falling through to Let's Encrypt.
+      when: acm_lookup.stdout | trim in ['', 'None']
+
+    - name: Export, decrypt and stage the certificate
+      when: acm_lookup.stdout | trim not in ['', 'None']
+      block:
+        # ACM only exports the private key encrypted, and requires a
+        # passphrase to do it. It never leaves this controller: generated
+        # here, used to decrypt, gone with the temp dir.
+        - name: Export and decrypt into a base64 pair
+          ansible.builtin.shell:
+            cmd: |
+              set -uo pipefail
+              command -v openssl >/dev/null 2>&1 || { echo "openssl missing on controller" >&2; exit 90; }
+              d=$(mktemp -d) || exit 91
+              trap 'rm -rf "$d"' EXIT
+
+              # A throwaway passphrase for this one export.
+              openssl rand -base64 24 > "$d/pass" || exit 92
+
+              {{ aws_cli | quote }} acm export-certificate \
+                --certificate-arn {{ acm_lookup.stdout | trim | quote }} \
+                --passphrase fileb://"$d/pass" --output json > "$d/exp.json" || exit 93
+
+              python3 - "$d" <<'PY' || exit 94
+              import json, sys
+              d = sys.argv[1]
+              e = json.load(open(d + "/exp.json"))
+              # cert first, then the chain, in one PEM bundle
+              open(d + "/crt", "w").write(e["Certificate"].rstrip() + "\n" + e.get("CertificateChain", "").rstrip() + "\n")
+              open(d + "/enc", "w").write(e["PrivateKey"])
+              PY
+
+              openssl rsa -in "$d/enc" -passin file:"$d/pass" -out "$d/key" 2>/dev/null || exit 95
+              openssl x509 -in "$d/crt" -noout -checkend 0 >/dev/null || exit 96
+              [ "$(openssl x509 -in "$d/crt" -noout -pubkey)" = "$(openssl pkey -in "$d/key" -pubout 2>/dev/null)" ] || exit 97
+
+              echo "CRT $(base64 -w0 "$d/crt")"
+              echo "KEY $(base64 -w0 "$d/key")"
+            executable: /bin/bash
+          environment:
+            AWS_REGION: "{{ aws_region | default('us-east-1') }}"
+          register: acm_export
+          changed_when: false
+          failed_when: false
+          no_log: true # stdout carries the decrypted key
+
+        - name: Explain an export that failed
+          ansible.builtin.debug:
+            msg: >-
+              Could not export the ACM certificate for {{ gitlab_host }}
+              ({{ acm_failures.get(acm_export.rc, 'rc=' ~ acm_export.rc) }}) —
+              falling through to Let's Encrypt.
+          vars:
+            acm_failures:
+              90: openssl is not installed on the controller
+              92: could not generate an export passphrase
+              93: acm export-certificate failed (permissions? wrong region?)
+              94: could not parse the export response
+              95: could not decrypt the private key
+              96: the exported certificate has expired
+              97: the exported key does not match the certificate
+          when: acm_export.rc != 0
+
+        - name: Publish the ACM certificate as the TLS Secret (k3s auto-applies)
+          ansible.builtin.template:
+            src: gitlab-tls.yaml.j2
+            dest: "{{ k3s_manifests_dir }}/gitlab-tls.yaml"
+            mode: "0600"
+          when: acm_export.rc == 0
+          vars:
+            tls_crt: "{{ acm_export.stdout_lines | select('match', '^CRT ') | first | regex_replace('^CRT ', '') }}"
+            tls_key: "{{ acm_export.stdout_lines | select('match', '^KEY ') | first | regex_replace('^KEY ', '') }}"
+
+        - name: Confirm the ACM restore
+          ansible.builtin.debug:
+            msg: >-
+              Seeded {{ gitlab_host }} from an ACM exportable certificate — no
+              Let's Encrypt issuance spent. It will be copied to S3 at the end
+              of this run, so later rebuilds take the free S3 path.
+          when: acm_export.rc == 0
