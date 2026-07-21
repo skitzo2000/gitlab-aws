@@ -94,7 +94,7 @@ resource "local_sensitive_file" "ansible_group_vars" {
 
     precondition {
       condition     = var.keycloak_issuer_url == "" || can(regex("^https://", var.keycloak_issuer_url))
-      error_message = "keycloak_issuer_url must be an https:// realm URL, e.g. https://keycloak.amnesia-labs.com/realms/<realm>."
+      error_message = "keycloak_issuer_url must be an https:// realm URL, e.g. https://keycloak.example.com/realms/<realm>."
     }
   }
 }

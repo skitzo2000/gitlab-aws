@@ -101,7 +101,7 @@ spec:
                 # address — all within 10/8. Without this, probes 404 forever.
                 gitlab_rails['monitoring_whitelist'] = ['127.0.0.0/8', '10.0.0.0/8']
 {% if keycloak_enabled %}
-                # SSO against the external amnesia-labs Keycloak (OIDC).
+                # SSO against the external Keycloak (OIDC).
                 # Password login stays enabled alongside SSO.
                 gitlab_rails['omniauth_enabled'] = true
                 gitlab_rails['omniauth_allow_single_sign_on'] = ['openid_connect']
