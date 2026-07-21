@@ -141,7 +141,26 @@ variable "keycloak_label" {
 # --- 5. Sizing & cost --------------------------------------------------------
 
 variable "use_spot" {
-  description = "false (default) = on-demand: launches always succeed, stop/start is fully under your control, no reclaim surprises. true = persistent spot (~70% off compute, but launches can stall on capacity and AWS can stop instances under you)."
+  description = <<-EOT
+    false (default) = on-demand: launches always succeed, stop/start is fully
+    under your control, no reclaim surprises. true = persistent spot (~70% off
+    compute, but launches can stall on capacity and AWS can stop instances
+    under you).
+
+    Two things this flag does NOT do, both of which have bitten this platform:
+
+    1. It does not convert running instances. instance_market_options applies
+       only at creation, so flipping this to false leaves existing spot
+       instances as spot AND shows no diff — `terraform plan` reads clean
+       while the fleet is still spot. Migrating needs an explicit
+       `-replace=aws_instance.<name>` (the deploy workflow exposes this as
+       the replace_workers / replace_cp inputs).
+    2. A spot instance cannot be resized. Changing *_instance_type on one
+       makes Terraform stop it, call ModifyInstanceAttribute, fail with
+       UnsupportedOperation, and leave it stopped — so a type change against
+       a live spot instance takes the node down and blocks every subsequent
+       apply until it is replaced.
+  EOT
   type        = bool
   default     = false
 }
