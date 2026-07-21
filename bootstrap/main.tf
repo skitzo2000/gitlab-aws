@@ -107,6 +107,19 @@ resource "aws_iam_role_policy" "deployer" {
           Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
           Resource = "${aws_s3_bucket.state.arn}/*"
         },
+        # The bucket encrypts with the AWS-managed aws/s3 key. That key's
+        # policy delegates to IAM, so S3 permissions alone aren't enough —
+        # without this, writing state fails AccessDenied. ViaService keeps the
+        # grant usable only through S3, never against the key directly.
+        {
+          Sid      = "StateEncryption"
+          Effect   = "Allow"
+          Action   = ["kms:Decrypt", "kms:GenerateDataKey"]
+          Resource = "*"
+          Condition = {
+            StringEquals = { "kms:ViaService" = "s3.${var.region}.amazonaws.com" }
+          }
+        },
       ],
       var.route53_zone_id != "" ? [
         {

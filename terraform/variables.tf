@@ -46,6 +46,18 @@ variable "admin_cidr" {
   default     = "0.0.0.0/0"
 }
 
+variable "ci_cidr" {
+  description = <<-EOT
+    Additional CIDR granted the same admin access as admin_cidr, set by the
+    deploy workflow to the runner's own IP. It exists so CI doesn't have to
+    overwrite admin_cidr: the runner needs SSH for the Ansible phase, but a
+    pipeline run must not lock your laptop out of SSH/kubectl until the next
+    local apply. Empty (the default) adds nothing.
+  EOT
+  type        = string
+  default     = ""
+}
+
 # --- 3. DNS & HTTPS ----------------------------------------------------------
 # Leaving `domain` empty gives a zero-setup HTTP demo at
 # gitlab.<eip>.sslip.io. Setting it switches the whole platform to

@@ -43,28 +43,34 @@ jobs:
 
       - name: Point Terraform at remote state
         run: |
+          # Must match bootstrap's generated backend_override.tf exactly.
+          # Locking is S3-native (use_lockfile) — there is no DynamoDB table.
           cat > backend_override.tf <<EOF
           terraform {
             backend "s3" {
-              bucket         = "${{ vars.TF_STATE_BUCKET }}"
-              key            = "gitlab-demo/terraform.tfstate"
-              region         = "${{ vars.AWS_REGION }}"
-              dynamodb_table = "${{ vars.TF_LOCK_TABLE }}"
+              bucket       = "${{ vars.TF_STATE_BUCKET }}"
+              key          = "gitlab-demo/terraform.tfstate"
+              region       = "${{ vars.AWS_REGION }}"
+              use_lockfile = true
             }
           }
           EOF
           terraform init -input=false
 
-      # SSH (22) and the k3s API (6443) open only to this runner's IP for
-      # the duration of this deployment's state.
-      - name: Scope admin access to this runner
+      # Grants this runner SSH (22) and k3s API (6443) access for the run,
+      # via ci_cidr — additive, so it doesn't evict the human admin_cidr.
+      - name: Grant this runner admin access
         id: ip
         run: echo "cidr=$(curl -fsS https://checkip.amazonaws.com)/32" >> "$GITHUB_OUTPUT"
 
       - name: Terraform apply
         env:
-          TF_VAR_admin_cidr: ${{ steps.ip.outputs.cidr }}
+          TF_VAR_admin_cidr: ${{ vars.ADMIN_CIDR }}
+          TF_VAR_ci_cidr: ${{ steps.ip.outputs.cidr }}
           TF_VAR_domain: ${{ vars.GITLAB_DOMAIN }}
+          TF_VAR_letsencrypt_email: ${{ vars.LETSENCRYPT_EMAIL }}
+          TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_route53_zone_id: ${{ vars.ROUTE53_ZONE_ID }}
           TF_VAR_keycloak_issuer_url: ${{ vars.KEYCLOAK_ISSUER_URL }}
           TF_VAR_keycloak_client_id: ${{ vars.KEYCLOAK_CLIENT_ID }}

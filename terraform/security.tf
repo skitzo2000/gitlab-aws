@@ -1,6 +1,14 @@
 # One security group for all nodes. Cluster-internal traffic (k3s API,
 # flannel VXLAN, kubelet, etc.) is allowed via the self-rule; only the demo's
 # public endpoints are exposed outward.
+
+locals {
+  # The admin plane is reachable from your IP AND, during a pipeline run, the
+  # runner's. compact() drops ci_cidr when unset (local applies); distinct()
+  # guards the case where they're the same address.
+  admin_cidrs = distinct(compact([var.admin_cidr, var.ci_cidr]))
+}
+
 resource "aws_security_group" "cluster" {
   name        = "${var.project}-cluster"
   description = "GitLab demo k3s cluster"
@@ -20,7 +28,7 @@ resource "aws_security_group" "cluster" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = [var.admin_cidr]
+    cidr_blocks = local.admin_cidrs
   }
 
   ingress {
@@ -28,7 +36,7 @@ resource "aws_security_group" "cluster" {
     from_port   = 6443
     to_port     = 6443
     protocol    = "tcp"
-    cidr_blocks = [var.admin_cidr]
+    cidr_blocks = local.admin_cidrs
   }
 
   # GitLab web UI. Open to the world so CI job pods can also reach the

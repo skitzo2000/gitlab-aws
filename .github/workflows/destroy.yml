@@ -39,19 +39,31 @@ jobs:
 
       - name: Point Terraform at remote state
         run: |
+          # Must match bootstrap's generated backend_override.tf exactly.
+          # Locking is S3-native (use_lockfile) — there is no DynamoDB table.
           cat > backend_override.tf <<EOF
           terraform {
             backend "s3" {
-              bucket         = "${{ vars.TF_STATE_BUCKET }}"
-              key            = "gitlab-demo/terraform.tfstate"
-              region         = "${{ vars.AWS_REGION }}"
-              dynamodb_table = "${{ vars.TF_LOCK_TABLE }}"
+              bucket       = "${{ vars.TF_STATE_BUCKET }}"
+              key          = "gitlab-demo/terraform.tfstate"
+              region       = "${{ vars.AWS_REGION }}"
+              use_lockfile = true
             }
           }
           EOF
           terraform init -input=false
 
+      # Destroy needs the same inputs as apply: Terraform has to be able to
+      # authenticate to Cloudflare to delete the DNS record it owns, and the
+      # inventory resource's preconditions still evaluate on the way down.
       - name: Terraform destroy
         env:
+          TF_VAR_domain: ${{ vars.GITLAB_DOMAIN }}
+          TF_VAR_letsencrypt_email: ${{ vars.LETSENCRYPT_EMAIL }}
+          TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TF_VAR_route53_zone_id: ${{ vars.ROUTE53_ZONE_ID }}
+          TF_VAR_keycloak_issuer_url: ${{ vars.KEYCLOAK_ISSUER_URL }}
+          TF_VAR_keycloak_client_id: ${{ vars.KEYCLOAK_CLIENT_ID }}
           TF_VAR_keycloak_client_secret: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
         run: terraform destroy -auto-approve -input=false
