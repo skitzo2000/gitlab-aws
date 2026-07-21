@@ -1,0 +1,91 @@
+---
+# Pull the durable cert out of S3 and hand it to the cluster as a Secret,
+# BEFORE the GitLab manifest is applied. An initContainer seeds it into
+# /etc/gitlab/ssl on first boot (see gitlab.yaml.j2); omnibus then finds a
+# valid cert already in place and never calls Let's Encrypt.
+#
+# Everything here is best-effort: no bucket, no objects, or an unreadable
+# copy all fall through to normal LE issuance rather than failing the run.
+
+- name: Look for a stored certificate
+  amazon.aws.s3_object:
+    bucket: "{{ cert_bucket }}"
+    prefix: "{{ cert_prefix }}/"
+    mode: list
+  delegate_to: localhost
+  become: false
+  register: stored
+  failed_when: false
+
+- name: Decide whether a usable pair is present
+  ansible.builtin.set_fact:
+    cert_pair_in_s3: >-
+      {{ ('%s/%s' % (cert_prefix, cert_crt_name)) in (stored.s3_keys | default([]))
+         and ('%s/%s' % (cert_prefix, cert_key_name)) in (stored.s3_keys | default([])) }}
+
+- name: Restore it
+  when: cert_pair_in_s3 | bool
+  block:
+    - name: Create a staging directory on the controller
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: gitlab-cert
+      delegate_to: localhost
+      become: false
+      register: stage
+      changed_when: false
+
+    - name: Download the certificate and key
+      amazon.aws.s3_object:
+        bucket: "{{ cert_bucket }}"
+        object: "{{ cert_prefix }}/{{ item }}"
+        dest: "{{ stage.path }}/{{ item }}"
+        mode: get
+      delegate_to: localhost
+      become: false
+      loop:
+        - "{{ cert_crt_name }}"
+        - "{{ cert_key_name }}"
+      changed_when: false
+
+    # Refuse to seed something GitLab would choke on. A truncated or
+    # mismatched pair would leave nginx dead with the cert already "restored",
+    # which is a far worse failure than simply issuing a new one.
+    - name: Verify the pair is valid and matches
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          openssl x509 -in {{ stage.path }}/{{ cert_crt_name }} -noout -checkend 0 &&
+          [ "$(openssl x509 -in {{ stage.path }}/{{ cert_crt_name }} -noout -pubkey)" =
+            "$(openssl pkey -in {{ stage.path }}/{{ cert_key_name }} -pubout)" ]
+        executable: /bin/bash
+      delegate_to: localhost
+      become: false
+      register: cert_check
+      failed_when: false
+      changed_when: false
+
+    - name: Report an unusable stored certificate
+      ansible.builtin.debug:
+        msg: >-
+          Stored certificate for {{ gitlab_host }} is expired or its key does
+          not match — ignoring it and letting Let's Encrypt issue a new one.
+      when: cert_check.rc != 0
+
+    - name: Publish the certificate as a Secret (k3s auto-applies)
+      ansible.builtin.template:
+        src: gitlab-tls.yaml.j2
+        dest: "{{ k3s_manifests_dir }}/gitlab-tls.yaml"
+        mode: "0600"
+      when: cert_check.rc == 0
+      vars:
+        tls_crt: "{{ lookup('ansible.builtin.file', stage.path + '/' + cert_crt_name) | b64encode }}"
+        tls_key: "{{ lookup('ansible.builtin.file', stage.path + '/' + cert_key_name) | b64encode }}"
+
+    - name: Drop the staging copy
+      ansible.builtin.file:
+        path: "{{ stage.path }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      changed_when: false

@@ -89,6 +89,19 @@ variable "cloudflare_api_token" {
   sensitive   = true
 }
 
+variable "cert_bucket" {
+  description = <<-EOT
+    S3 bucket holding the durable copy of the Let's Encrypt certificate
+    (normally the Terraform state bucket — see bootstrap's state_bucket
+    output). The live cert sits on a local-path PVC, i.e. one worker's root
+    volume; without this, replacing that worker spends one of Let's Encrypt's
+    five weekly issuances for the hostname. Empty disables persistence and
+    restores the old behaviour of issuing on every rebuild.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "letsencrypt_email" {
   description = "Contact email for Let's Encrypt registration. Empty = admin@<domain>."
   type        = string

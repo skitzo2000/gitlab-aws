@@ -17,6 +17,11 @@
   roles:
     - nat_gateway # before anything the workers need egress for
     - k3s_server
+    # Publishes the stored cert as a Secret before GitLab can start, so the
+    # seed-cert initContainer finds it on the very first boot.
+    - role: gitlab_cert
+      vars:
+        gitlab_cert_action: restore
     - gitlab
 
 - name: Workers — join the cluster
@@ -29,4 +34,8 @@
   hosts: control_plane
   become: true
   roles:
-    - gitlab_runner
+    - gitlab_runner # waits on /-/readiness, so the cert exists past here
+    # Captures a first issuance or an in-place renewal back to S3.
+    - role: gitlab_cert
+      vars:
+        gitlab_cert_action: backup

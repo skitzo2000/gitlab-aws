@@ -39,6 +39,8 @@ resource "local_sensitive_file" "ansible_group_vars" {
     runner_image         = var.runner_image
     gitlab_root_password = random_password.gitlab_root.result
 
+    cert_bucket = var.cert_bucket
+
     keycloak_enabled       = var.keycloak_issuer_url != ""
     keycloak_issuer_url    = var.keycloak_issuer_url
     keycloak_client_id     = var.keycloak_client_id
@@ -73,6 +75,11 @@ resource "local_sensitive_file" "ansible_group_vars" {
     precondition {
       condition     = var.cloudflare_zone_id == "" || var.cloudflare_api_token != ""
       error_message = "cloudflare_zone_id is set but cloudflare_api_token is empty — create a token with Zone:DNS:Edit and set it (terraform.tfvars.example STEP 2)."
+    }
+
+    precondition {
+      condition     = var.cert_bucket == "" || var.domain != ""
+      error_message = "cert_bucket is set but domain is empty — there is no Let's Encrypt certificate to persist in HTTP/sslip.io mode (terraform.tfvars.example STEP 2)."
     }
 
     precondition {

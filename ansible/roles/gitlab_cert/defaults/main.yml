@@ -1,0 +1,12 @@
+---
+k3s_manifests_dir: /var/lib/rancher/k3s/server/manifests
+
+# S3 location of the durable cert copy. cert_bucket comes from Terraform
+# (empty = feature off, LE issues normally). The state bucket is reused: it
+# is already versioned, KMS-encrypted and reachable by exactly the two
+# principals that deploy this platform.
+cert_prefix: "certs/{{ gitlab_host }}"
+
+# Omnibus' own naming for the files it writes and renews.
+cert_crt_name: "{{ gitlab_host }}.crt"
+cert_key_name: "{{ gitlab_host }}.key"

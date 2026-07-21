@@ -1,0 +1,26 @@
+---
+# Durable Let's Encrypt certificate, kept in S3 so it outlives the nodes.
+#
+# The cert lives on a local-path PVC, i.e. a directory on one worker's root
+# volume — replace that worker and the cert goes with it, and the next deploy
+# spends one of Let's Encrypt's five weekly issuances for the hostname. This
+# role decouples the two: S3 holds the durable copy, the cluster holds the
+# live one.
+#
+# Called twice from site.yml with gitlab_cert_action set to:
+#   restore  before the GitLab manifest is applied
+#   backup   after GitLab reports ready
+#
+# Set cert_bucket empty (the Terraform default) to switch the whole thing off
+# and let Let's Encrypt issue on every rebuild, as it did before.
+
+- name: Skip when no bucket is configured
+  ansible.builtin.debug:
+    msg: "cert_bucket is unset — certificate persistence is off."
+  when: cert_bucket | default('') | length == 0
+
+- name: Run the requested action
+  ansible.builtin.include_tasks: "{{ gitlab_cert_action }}.yml"
+  when:
+    - cert_bucket | default('') | length > 0
+    - gitlab_https | bool

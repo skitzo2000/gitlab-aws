@@ -1,0 +1,8 @@
+---
+# Install with: ansible-galaxy collection install -r requirements.yml
+# Needed only by the gitlab_cert role, which moves the Let's Encrypt
+# certificate to and from S3 (its modules run on the controller, not on the
+# cluster nodes — no AWS credentials ever reach the instances).
+collections:
+  - name: amazon.aws
+    version: ">=9.0.0"

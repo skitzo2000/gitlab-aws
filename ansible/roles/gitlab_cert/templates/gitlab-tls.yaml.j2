@@ -1,0 +1,24 @@
+---
+# Seed copy of the Let's Encrypt certificate, restored from S3.
+# Consumed once, by the seed-cert initContainer in gitlab-demo.yaml, which
+# copies it onto the PVC only if /etc/gitlab/ssl is empty. GitLab owns the
+# files from then on and renews them in place — this Secret is never the
+# live source, so a stale copy here cannot break a running cluster.
+#
+# Carries its own namespace: this manifest is written before the GitLab one,
+# so on a fresh cluster the namespace would not exist yet. Both are applied
+# idempotently, so declaring it twice is harmless.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitlab-tls
+  namespace: gitlab
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ tls_crt }}
+  tls.key: {{ tls_key }}

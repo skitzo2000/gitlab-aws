@@ -1,0 +1,79 @@
+---
+# Push the live certificate back to S3 after GitLab is healthy. Covers both
+# the first issuance and every later renewal: omnibus renews in place inside
+# /etc/gitlab/ssl, and each deploy re-uploads whatever is currently there.
+#
+# Best-effort by design — a failure to back up must never fail a deploy of an
+# otherwise healthy cluster.
+
+- name: Read the live certificate out of the GitLab pod
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - -n
+      - gitlab
+      - exec
+      - deploy/gitlab
+      - --
+      - tar
+      - -cf
+      - "-"
+      - -C
+      - /etc/gitlab/ssl
+      - "{{ cert_crt_name }}"
+      - "{{ cert_key_name }}"
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: cert_tar
+  failed_when: false
+  changed_when: false
+
+- name: Back it up
+  when: cert_tar.rc == 0
+  block:
+    - name: Create a staging directory on the controller
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: gitlab-cert
+      delegate_to: localhost
+      become: false
+      register: stage
+      changed_when: false
+
+    - name: Unpack the pair on the controller
+      ansible.builtin.shell:
+        cmd: tar -xf - -C {{ stage.path }}
+        stdin: "{{ cert_tar.stdout }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    # s3_object with mode=put is idempotent on content (it compares etags),
+    # so an unchanged cert re-uploads as "ok" and a renewal shows as changed.
+    - name: Store the certificate and key
+      amazon.aws.s3_object:
+        bucket: "{{ cert_bucket }}"
+        object: "{{ cert_prefix }}/{{ item }}"
+        src: "{{ stage.path }}/{{ item }}"
+        mode: put
+        encrypt: true
+      delegate_to: localhost
+      become: false
+      loop:
+        - "{{ cert_crt_name }}"
+        - "{{ cert_key_name }}"
+
+    - name: Drop the staging copy
+      ansible.builtin.file:
+        path: "{{ stage.path }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+- name: Report a certificate that could not be backed up
+  ansible.builtin.debug:
+    msg: >-
+      Could not read /etc/gitlab/ssl out of the GitLab pod — nothing was
+      backed up this run. The cluster is unaffected; the next deploy retries.
+  when: cert_tar.rc != 0

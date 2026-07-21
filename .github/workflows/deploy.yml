@@ -69,6 +69,7 @@ jobs:
           TF_VAR_ci_cidr: ${{ steps.ip.outputs.cidr }}
           TF_VAR_domain: ${{ vars.GITLAB_DOMAIN }}
           TF_VAR_letsencrypt_email: ${{ vars.LETSENCRYPT_EMAIL }}
+          TF_VAR_cert_bucket: ${{ vars.TF_STATE_BUCKET }}
           TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_route53_zone_id: ${{ vars.ROUTE53_ZONE_ID }}
@@ -77,8 +78,13 @@ jobs:
           TF_VAR_keycloak_client_secret: ${{ secrets.KEYCLOAK_CLIENT_SECRET }}
         run: terraform apply -auto-approve -input=false
 
+      # boto3 and amazon.aws back the gitlab_cert role's S3 calls, which run
+      # on this runner under the assumed role — never on the cluster nodes.
       - name: Install Ansible
-        run: python3 -m pip install --user ansible-core
+        run: |
+          python3 -m pip install --user ansible-core boto3
+          ansible-galaxy collection install -r ansible/requirements.yml
+        working-directory: .
 
       - name: Configure cluster (k3s + GitLab + runner)
         working-directory: ansible
