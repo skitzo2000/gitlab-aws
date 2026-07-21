@@ -1,8 +1,25 @@
 ---
-# k3s auto-applies (and re-applies on change) anything in its manifests dir —
-# no kubectl, no helm, no kubernetes python deps needed.
+# k3s auto-applies anything in its manifests dir, so templating the file is
+# enough for a first install.
 - name: Deploy GitLab manifest
   ansible.builtin.template:
     src: gitlab.yaml.j2
     dest: "{{ k3s_manifests_dir }}/gitlab-demo.yaml"
     mode: "0600"
+  register: gitlab_manifest
+
+# ...but auto-apply only reconciles a manifest when the FILE changes, and it
+# never recreates a resource deleted out from under it. On a rebuild the
+# rendered file is usually byte-identical, so if k3s_server's prune step
+# deleted the stranded gitlab-data PVC (its node was replaced), nothing
+# recreates it: the pod hangs forever on
+#   FailedScheduling ... persistentvolumeclaim "gitlab-data" not found
+# An explicit apply closes that gap — idempotent, and it recreates whatever
+# is missing regardless of whether the file changed.
+- name: Ensure every object in the manifest exists (recreates a pruned PVC)
+  ansible.builtin.command:
+    argv: [kubectl, apply, -f, "{{ k3s_manifests_dir }}/gitlab-demo.yaml"]
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  register: gitlab_apply
+  changed_when: "'created' in gitlab_apply.stdout or 'configured' in gitlab_apply.stdout"
