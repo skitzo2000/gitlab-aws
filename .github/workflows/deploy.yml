@@ -30,6 +30,14 @@ on:
           the public address, DNS record and certificate are unaffected.
         type: boolean
         default: false
+      cert_only:
+        description: >-
+          Run only the certificate restore/backup against S3, skipping the
+          rest of the playbook. Proves the restore path works before you
+          rely on it during a rebuild — it writes the Secret and nothing
+          else, so a running cluster is unaffected.
+        type: boolean
+        default: false
 
 # The runner holds no AWS credentials — it assumes the deployer role
 # (created by bootstrap/) via GitHub's OIDC federation, valid only for
@@ -113,9 +121,15 @@ jobs:
       - name: Install Ansible
         run: python3 -m pip install --user ansible-core
 
+      # cert_only exercises the S3 restore/backup path against the real
+      # bucket and the real controller, without touching the cluster: the
+      # restore just writes a Secret manifest, and the seed-cert
+      # initContainer reads it only when a pod is recreated. Worth running
+      # before any rebuild, because a rebuild whose restore fails has no
+      # fallback once the weekly Let's Encrypt budget is spent.
       - name: Configure cluster (k3s + GitLab + runner)
         working-directory: ansible
-        run: ansible-playbook site.yml
+        run: ansible-playbook site.yml ${{ inputs.cert_only && '--tags cert' || '' }}
 
       - name: Deployment summary
         run: |

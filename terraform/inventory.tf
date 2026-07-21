@@ -40,6 +40,7 @@ resource "local_sensitive_file" "ansible_group_vars" {
     gitlab_root_password = random_password.gitlab_root.result
 
     cert_bucket = var.cert_bucket
+    aws_region  = var.region # the cert role's S3 calls run in this region
 
     keycloak_enabled       = var.keycloak_issuer_url != ""
     keycloak_issuer_url    = var.keycloak_issuer_url
