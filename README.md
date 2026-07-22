@@ -283,6 +283,34 @@ defaults, both in the omniauth block in
 `ansible/roles/gitlab/templates/gitlab.yaml.j2`. PKCE is enabled. Leaving
 `keycloak_issuer_url` empty disables the whole block.
 
+### Gating who may log in
+
+GitLab CE has no "required claim/group" setting, so the allow-list lives in
+Keycloak and is bound to the `gitlab` client alone — every other application in
+the realm authenticates exactly as it did before:
+
+| Object (realm `amnesia-labs`) | Purpose |
+| --- | --- |
+| group `/gitlab` | The allow-list. Membership is the only thing an operator edits day to day. |
+| realm role `gitlab-access` | Granted to the group, so members inherit it. |
+| auth flow `gitlab-group-gate` | Copy of `browser`; inside its `forms` sub-flow, after the password form, a CONDITIONAL sub-flow `gitlab-access-check` = **Condition - user role** (`condUserRole=gitlab-access`, `negate=true`) → **Deny access**. |
+| client `gitlab` → browser flow override | Binds that flow. |
+
+Signing in from a fresh browser, a user outside `/gitlab` is stopped at Keycloak
+and never reaches the callback, so GitLab creates no account for them. Add
+someone to `/gitlab` and their next sign-in works and provisions their GitLab
+account automatically. Arriving with a Keycloak session already established by
+another app in the realm, a user is admitted by the flow's Cookie step and gets
+an auto-created GitLab account with no group membership — public projects only.
+
+Access to a project is then GitLab's own membership model: put people in a
+GitLab group, give the group the project. Nothing about the repo layout depends
+on Keycloak beyond the identity itself.
+
+This lives on the external Keycloak, not in this repo, so it survives a full
+platform rebuild — and it is not recreated by `terraform apply`. Point the
+platform at a fresh realm and you rebuild it there.
+
 ## Configuration
 
 One central config, one direction of flow:
