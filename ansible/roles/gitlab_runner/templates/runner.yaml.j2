@@ -50,14 +50,12 @@ stringData:
       url = "{{ gitlab_url }}"
       token = "{{ runner_token }}"
       executor = "kubernetes"
-      # In the kubernetes executor, service containers (e.g. docker:dind)
-      # share the build pod's network namespace by default, so they're only
-      # reachable on localhost and the service alias never resolves — a job
-      # with DOCKER_HOST=tcp://docker:2375 fails with "Cannot connect to the
-      # Docker daemon". FF_NETWORK_PER_BUILD gives each build its own network
-      # where service aliases DO resolve, which is what dind-based CI (like
-      # the Spaceballs demo) assumes.
-      environment = ["FF_NETWORK_PER_BUILD=1"]
+      # No FF_NETWORK_PER_BUILD: in the kubernetes executor a job's service
+      # containers (e.g. docker:dind) share the build pod's network namespace,
+      # so the daemon is reachable at tcp://localhost:2375 — which is how the
+      # dind-based CI here connects. Turning that flag on isolates the service
+      # onto its own network and breaks exactly that path (verified: with it
+      # on, neither localhost nor the docker alias could reach dind).
       [runners.kubernetes]
         namespace = "gitlab-runner"
         privileged = true
