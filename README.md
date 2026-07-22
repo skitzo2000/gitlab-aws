@@ -134,7 +134,12 @@ That's it. From then on:
 
 - **`git push` to `main`** (touching `terraform/` or `ansible/`) deploys —
   apply + playbook, with a run summary showing the URLs.
-- **Actions → destroy → type `destroy`** tears everything down.
+- **Actions → teardown → type `teardown`** stops the meter: instances, root
+  volumes and the Elastic IP. It finishes by listing anything still billable,
+  so a green run means the account is actually empty rather than that
+  Terraform merely exited 0. A `wipe_cert` toggle (off by default) also drops
+  the stored certificate — that saves nothing, and keeping it is what lets a
+  rebuild skip Let's Encrypt.
 - Terraform state lives in S3 (created by bootstrap), shared between CI and
   laptops — bootstrap drops a gitignored `backend_override.tf` so local
   `terraform` commands use the same state. (If you had local state first,
@@ -209,6 +214,28 @@ Tear down:
 ```bash
 terraform destroy
 ```
+
+### What it costs, and what teardown actually stops
+
+On-demand in us-east-1 at the defaults (1× t3a.small + 2× m6a.large, 100 GiB
+of gp3, one Elastic IP):
+
+| | ~$/month | Survives `stop`? | Survives `destroy`? |
+|---|---:|---|---|
+| 2× m6a.large workers | 126 | no | no |
+| t3a.small control plane | 14 | no | no |
+| 100 GiB gp3 root volumes | 8 | **yes** | no |
+| Elastic IP | 3.65 | **yes** (billed detached) | no |
+| S3: tfstate + certificate | ~0 | yes | **yes** |
+
+The bill is EC2. `terraform destroy` is what ends it — instances, root volumes
+and the EIP all go together. **stop/start leaves ~$12/month running**, which
+is the point of park mode, but it is not zero.
+
+S3 is rounding error: a few KB of state and one certificate. The teardown
+workflow keeps both by default — the certificate because restoring it is what
+lets a rebuild skip Let's Encrypt's 5-per-week limit, and the state bucket
+because deleting it means re-running `bootstrap/` before you can deploy again.
 
 ## What the platform provides
 
