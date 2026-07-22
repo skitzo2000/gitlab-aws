@@ -121,15 +121,35 @@ jobs:
       - name: Install Ansible
         run: python3 -m pip install --user ansible-core
 
-      # cert_only exercises the S3 restore/backup path against the real
-      # bucket and the real controller, without touching the cluster: the
-      # restore just writes a Secret manifest, and the seed-cert
-      # initContainer reads it only when a pod is recreated. Worth running
-      # before any rebuild, because a rebuild whose restore fails has no
-      # fallback once the weekly Let's Encrypt budget is spent.
-      - name: Configure cluster (k3s + GitLab + runner)
+      # The playbook runs as ordered phases, each its own step, so the flow is
+      # legible in the GitHub UI — platform vs. software vs. certificate,
+      # rather than one opaque node. site.yml just imports these five in order
+      # for local runs. cert_only skips the platform/software phases (the two
+      # `if`s below) and runs just restore+backup against the real bucket —
+      # proving the cert path without touching a running cluster.
+
+      - name: Platform — k3s cluster + NAT
+        if: ${{ !inputs.cert_only }}
         working-directory: ansible
-        run: ansible-playbook site.yml ${{ inputs.cert_only && '--tags cert' || '' }}
+        run: ansible-playbook 01-platform.yml
+
+      - name: Certificate — restore from S3
+        working-directory: ansible
+        run: ansible-playbook 02-cert-restore.yml
+
+      - name: Software — GitLab
+        if: ${{ !inputs.cert_only }}
+        working-directory: ansible
+        run: ansible-playbook 03-gitlab.yml
+
+      - name: Software — GitLab Runner
+        if: ${{ !inputs.cert_only }}
+        working-directory: ansible
+        run: ansible-playbook 04-runner.yml
+
+      - name: Certificate — back up to S3
+        working-directory: ansible
+        run: ansible-playbook 05-cert-backup.yml
 
       - name: Deployment summary
         run: |

@@ -1,0 +1,12 @@
+---
+# Phase 5 — Certificate (backup). GitLab is healthy by now, so copy the live
+# cert back to S3 — captures both a first Let's Encrypt issuance and any
+# later in-place renewal. No-op when cert_bucket is unset.
+
+- name: Certificate — back up to S3 (after GitLab is healthy)
+  hosts: control_plane
+  become: true
+  roles:
+    - role: gitlab_cert
+      vars:
+        gitlab_cert_action: backup

@@ -1,43 +1,15 @@
 ---
-# GitLab demo platform configuration. Terraform provisions the instances and
-# generates inventory/; this playbook does everything else. Idempotent —
-# re-run freely.
+# The full deploy as ordered phases. Each phase is also a standalone playbook
+# (CI runs them as separate named steps so the flow is visible in GitHub);
+# run them all at once for a local deploy:
+#
+#   ansible-playbook site.yml
+#
+# Idempotent — re-run freely. Order matters: the certificate is restored
+# before GitLab starts and backed up after it is healthy.
 
-- name: Wait for hosts to come up
-  hosts: all
-  gather_facts: false
-  tasks:
-    - name: Wait for SSH
-      ansible.builtin.wait_for_connection:
-        timeout: 300
-
-- name: Control plane — NAT for workers, k3s server (tainted), GitLab manifest
-  hosts: control_plane
-  become: true
-  roles:
-    - nat_gateway # before anything the workers need egress for
-    - k3s_server
-    # Publishes the stored cert as a Secret before GitLab can start, so the
-    # seed-cert initContainer finds it on the very first boot.
-    - role: gitlab_cert
-      tags: [cert]
-      vars:
-        gitlab_cert_action: restore
-    - gitlab
-
-- name: Workers — join the cluster
-  hosts: workers
-  become: true
-  roles:
-    - k3s_agent
-
-- name: Hosted runner — register against GitLab and deploy
-  hosts: control_plane
-  become: true
-  roles:
-    - gitlab_runner # waits on /-/readiness, so the cert exists past here
-    # Captures a first issuance or an in-place renewal back to S3.
-    - role: gitlab_cert
-      tags: [cert]
-      vars:
-        gitlab_cert_action: backup
+- import_playbook: 01-platform.yml
+- import_playbook: 02-cert-restore.yml
+- import_playbook: 03-gitlab.yml
+- import_playbook: 04-runner.yml
+- import_playbook: 05-cert-backup.yml

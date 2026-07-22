@@ -1,0 +1,10 @@
+---
+# Phase 3 — Software: GitLab. Templates the omnibus manifest into k3s'
+# auto-apply directory; the pod schedules onto a worker and boots on the
+# certificate seeded in phase 2.
+
+- name: Software — GitLab
+  hosts: control_plane
+  become: true
+  roles:
+    - gitlab

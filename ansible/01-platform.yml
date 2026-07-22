@@ -1,0 +1,26 @@
+---
+# Phase 1 — Platform. The k3s cluster and the networking under it; nothing
+# GitLab-specific. This is the substrate the software phases install onto.
+#
+# Standalone playbook so CI can show it as its own step; site.yml imports it.
+
+- name: Wait for every host to accept SSH
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+
+- name: Control plane — NAT egress + k3s server (tainted)
+  hosts: control_plane
+  become: true
+  roles:
+    - nat_gateway # workers reach the internet through here — must be first
+    - k3s_server  # also prunes nodes/PVCs left behind by replaced workers
+
+- name: Workers — join the k3s cluster
+  hosts: workers
+  become: true
+  roles:
+    - k3s_agent
