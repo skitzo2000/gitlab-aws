@@ -16,7 +16,12 @@
   retries: 60
   delay: 15
 
-- name: Create the runner and deploy it
+# Registration (getting a runner token) happens once, on first deploy. But the
+# config.toml is re-rendered on EVERY run, so changes to it — feature flags,
+# concurrency, image — actually reach the cluster. Splitting these two is the
+# point: a config tweak must not require re-registering the runner, and a
+# re-register must not be silently skipped just because the manifest exists.
+- name: Register a new instance runner (first deploy only)
   when: not runner_manifest.stat.exists
   block:
     - name: Generate a bootstrap admin token
@@ -60,10 +65,38 @@
         status_code: 201
       register: runner_create
 
-    - name: Deploy the runner manifest (k3s auto-applies)
-      ansible.builtin.template:
-        src: runner.yaml.j2
-        dest: "{{ k3s_manifests_dir }}/gitlab-runner.yaml"
-        mode: "0600"
-      vars:
+    - name: Remember the new runner token
+      ansible.builtin.set_fact:
         runner_token: "{{ runner_create.json.token }}"
+
+# Already registered: recover the token from the manifest already on disk so
+# the config can be re-rendered without minting a second runner.
+- name: Reuse the existing runner token
+  when: runner_manifest.stat.exists
+  block:
+    - name: Read the current manifest
+      ansible.builtin.slurp:
+        src: "{{ k3s_manifests_dir }}/gitlab-runner.yaml"
+      register: runner_manifest_current
+
+    - name: Extract the runner token from it
+      ansible.builtin.set_fact:
+        runner_token: "{{ runner_manifest_current.content | b64decode | regex_search('token = \"([^\"]+)\"', '\\1') | first }}"
+
+- name: Deploy/refresh the runner manifest (k3s auto-applies)
+  ansible.builtin.template:
+    src: runner.yaml.j2
+    dest: "{{ k3s_manifests_dir }}/gitlab-runner.yaml"
+    mode: "0600"
+  register: runner_tmpl
+
+# The config.toml lives in a Secret; changing a Secret does not restart the
+# pod that mounts it. Roll the deployment so a config change actually takes
+# effect (also adopts a fresh token after a re-register).
+- name: Roll the runner so config changes take effect
+  ansible.builtin.command:
+    argv: [kubectl, -n, gitlab-runner, rollout, restart, deploy/gitlab-runner]
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+  when: runner_tmpl is changed
+  changed_when: true
